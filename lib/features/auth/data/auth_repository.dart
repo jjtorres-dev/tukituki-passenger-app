@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../domain/public_user.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -128,6 +129,33 @@ class AuthRepository {
     );
 
     return accessToken != null && refreshToken != null;
+  }
+
+  Future<PublicUser> getMe() async {
+    final response =
+        await _dio.get<Map<String, dynamic>>(
+      'auth/me',
+    );
+
+    final data = response.data;
+
+    if (data == null) {
+      throw Exception(
+        'El backend no devolvió los datos del usuario.',
+      );
+    }
+
+    return PublicUser.fromJson(data);
+  }
+
+  Future<void> logout() async {
+    try {
+      await _dio.post<void>(
+        'auth/logout',
+      );
+    } finally {
+      await clearSession();
+    }
   }
 
   Future<void> clearSession() async {

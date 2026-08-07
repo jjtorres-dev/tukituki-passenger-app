@@ -19,30 +19,52 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   }
 
   Future<void> _checkSession() async {
-    // Dejamos visible el splash brevemente.
     await Future.delayed(
       const Duration(milliseconds: 1200),
     );
 
     try {
+      final repository =
+          ref.read(authRepositoryProvider);
+
       final hasSession =
-          await ref.read(authRepositoryProvider).hasSession();
+          await repository.hasSession();
+
+      if (!hasSession) {
+        if (mounted) {
+          context.go('/login');
+        }
+        return;
+      }
+
+      final user = await repository.getMe();
 
       if (!mounted) {
         return;
       }
 
-      if (hasSession) {
+      final isPassenger =
+          user.roles.contains('PASSENGER');
+
+      if (user.status == 'ACTIVE' &&
+          user.isPhoneVerified &&
+          isPassenger) {
         context.go('/home');
       } else {
-        context.go('/login');
+        await repository.clearSession();
+
+        if (mounted) {
+          context.go('/login');
+        }
       }
     } catch (_) {
-      if (!mounted) {
-        return;
-      }
+      await ref
+          .read(authRepositoryProvider)
+          .clearSession();
 
-      context.go('/login');
+      if (mounted) {
+        context.go('/login');
+      }
     }
   }
 

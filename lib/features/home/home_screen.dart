@@ -18,7 +18,7 @@ class HomeScreen extends ConsumerWidget {
             onPressed: () async {
               await ref
                   .read(authRepositoryProvider)
-                  .clearSession();
+                  .logout();
 
               if (context.mounted) {
                 context.go('/login');
