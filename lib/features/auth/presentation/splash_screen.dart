@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../passenger/data/passenger_profile_repository.dart';
+import '../../ride/data/ride_repository.dart';
 import '../data/auth_repository.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -13,16 +14,18 @@ class SplashScreen extends ConsumerStatefulWidget {
       _SplashScreenState();
 }
 
-class _SplashScreenState extends ConsumerState<SplashScreen> {
+class _SplashScreenState
+    extends ConsumerState<SplashScreen> {
   @override
   void initState() {
     super.initState();
+
     _checkSession();
   }
 
   Future<void> _checkSession() async {
     await Future.delayed(
-      const Duration(milliseconds: 1200),
+      const Duration(milliseconds: 800),
     );
 
     try {
@@ -41,7 +44,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         return;
       }
 
-      final user = await authRepository.getMe();
+      final user =
+          await authRepository.getMe();
 
       if (!mounted) {
         return;
@@ -76,10 +80,33 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
       if (profile == null) {
         context.go('/complete-profile');
-      } else {
-        context.go('/home');
+        return;
       }
-    } catch (_) {
+
+      // IMPORTANTE:
+      // Antes de ir al Home comprobamos
+      // si este pasajero ya tiene un viaje activo.
+      final activeRide = await ref
+          .read(rideRepositoryProvider)
+          .getActiveRide();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (activeRide != null) {
+        context.go(
+          '/ride/${activeRide.id}',
+        );
+        return;
+      }
+
+      context.go('/home');
+    } catch (error) {
+      debugPrint(
+        'Error restaurando sesión del pasajero: $error',
+      );
+
       await ref
           .read(authRepositoryProvider)
           .clearSession();
@@ -114,7 +141,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
               ),
               SizedBox(height: 8),
               Text(
-                'Tu viaje empieza aquí',
+                'Recuperando tu viaje...',
                 style: TextStyle(
                   fontSize: 16,
                 ),

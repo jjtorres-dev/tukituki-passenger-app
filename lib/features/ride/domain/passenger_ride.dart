@@ -18,47 +18,85 @@ class PassengerRide {
   final String id;
   final String fareQuoteId;
   final String status;
+
   final num distanceMeters;
   final num estimatedDurationSeconds;
+
   final String estimatedFare;
   final String estimatedPassengerFare;
+
   final String currency;
   final String paymentMethod;
+
   final String originAddress;
   final String destinationAddress;
+
   final DateTime requestedAt;
-  final DateTime searchExpiresAt;
+  final DateTime? searchExpiresAt;
 
   factory PassengerRide.fromJson(
     Map<String, dynamic> json,
   ) {
     final origin =
-        json['origin'] as Map<String, dynamic>;
+        json['origin'] as Map<String, dynamic>? ?? {};
 
     final destination =
-        json['destination'] as Map<String, dynamic>;
+        json['destination'] as Map<String, dynamic>? ?? {};
+
+    final estimatedFare =
+        json['estimatedFare']?.toString() ?? '0.00';
+
+    final estimatedPassengerFare =
+        json['estimatedPassengerFare']?.toString() ??
+            estimatedFare;
+
+    final requestedAtValue =
+        json['requestedAt']?.toString();
+
+    final searchExpiresAtValue =
+        json['searchExpiresAt']?.toString();
 
     return PassengerRide(
-      id: json['id'] as String,
-      fareQuoteId: json['fareQuoteId'] as String,
-      status: json['status'] as String,
-      distanceMeters: json['distanceMeters'] as num,
+      id: json['id']?.toString() ?? '',
+      fareQuoteId:
+          json['fareQuoteId']?.toString() ?? '',
+      status:
+          json['status']?.toString() ?? 'UNKNOWN',
+
+      distanceMeters:
+          json['distanceMeters'] as num? ?? 0,
+
       estimatedDurationSeconds:
-          json['estimatedDurationSeconds'] as num,
-      estimatedFare: json['estimatedFare'] as String,
+          json['estimatedDurationSeconds'] as num? ?? 0,
+
+      estimatedFare: estimatedFare,
+
       estimatedPassengerFare:
-          json['estimatedPassengerFare'] as String,
-      currency: json['currency'] as String,
-      paymentMethod: json['paymentMethod'] as String,
-      originAddress: origin['address'] as String,
+          estimatedPassengerFare,
+
+      currency:
+          json['currency']?.toString() ?? 'PEN',
+
+      paymentMethod:
+          json['paymentMethod']?.toString() ?? 'CASH',
+
+      originAddress:
+          origin['address']?.toString() ?? 'Origen',
+
       destinationAddress:
-          destination['address'] as String,
-      requestedAt: DateTime.parse(
-        json['requestedAt'] as String,
-      ),
-      searchExpiresAt: DateTime.parse(
-        json['searchExpiresAt'] as String,
-      ),
+          destination['address']?.toString() ??
+              'Destino',
+
+      requestedAt: requestedAtValue != null
+          ? DateTime.parse(requestedAtValue)
+          : DateTime.now(),
+
+      searchExpiresAt:
+          searchExpiresAtValue != null
+              ? DateTime.tryParse(
+                  searchExpiresAtValue,
+                )
+              : null,
     );
   }
 }

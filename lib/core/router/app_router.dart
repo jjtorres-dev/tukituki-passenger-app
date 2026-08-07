@@ -7,6 +7,7 @@ import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/passenger/presentation/complete_profile_screen.dart';
 import '../../features/ride/presentation/ride_searching_screen.dart';
+import '../../features/ride/presentation/ride_receipt_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/splash',
@@ -51,6 +52,18 @@ final appRouter = GoRouter(
       path: '/home',
       builder: (context, state) =>
           const HomeScreen(),
+    ),
+
+    GoRoute(
+      path: '/ride/:rideId/receipt',
+      builder: (context, state) {
+        final rideId =
+            state.pathParameters['rideId']!;
+
+        return RideReceiptScreen(
+          rideId: rideId,
+        );
+      },
     ),
 
     GoRoute(
