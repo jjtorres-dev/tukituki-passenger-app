@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../passenger/data/passenger_profile_repository.dart';
 import '../data/auth_repository.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  ConsumerState<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() =>
+      _SplashScreenState();
 }
 
 class _SplashScreenState extends ConsumerState<SplashScreen> {
@@ -24,20 +26,22 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     );
 
     try {
-      final repository =
+      final authRepository =
           ref.read(authRepositoryProvider);
 
       final hasSession =
-          await repository.hasSession();
+          await authRepository.hasSession();
 
-      if (!hasSession) {
-        if (mounted) {
-          context.go('/login');
-        }
+      if (!mounted) {
         return;
       }
 
-      final user = await repository.getMe();
+      if (!hasSession) {
+        context.go('/login');
+        return;
+      }
+
+      final user = await authRepository.getMe();
 
       if (!mounted) {
         return;
@@ -46,25 +50,45 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       final isPassenger =
           user.roles.contains('PASSENGER');
 
-      if (user.status == 'ACTIVE' &&
+      final isValidPassenger =
+          user.status == 'ACTIVE' &&
           user.isPhoneVerified &&
-          isPassenger) {
-        context.go('/home');
-      } else {
-        await repository.clearSession();
+          isPassenger;
 
-        if (mounted) {
-          context.go('/login');
+      if (!isValidPassenger) {
+        await authRepository.clearSession();
+
+        if (!mounted) {
+          return;
         }
+
+        context.go('/login');
+        return;
+      }
+
+      final profile = await ref
+          .read(passengerProfileRepositoryProvider)
+          .getMyProfile();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (profile == null) {
+        context.go('/complete-profile');
+      } else {
+        context.go('/home');
       }
     } catch (_) {
       await ref
           .read(authRepositoryProvider)
           .clearSession();
 
-      if (mounted) {
-        context.go('/login');
+      if (!mounted) {
+        return;
       }
+
+      context.go('/login');
     }
   }
 

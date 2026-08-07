@@ -5,6 +5,8 @@ import '../../features/auth/presentation/otp_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/home/home_screen.dart';
+import '../../features/passenger/presentation/complete_profile_screen.dart';
+import '../../features/ride/presentation/ride_searching_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/splash',
@@ -38,10 +40,29 @@ final appRouter = GoRouter(
         );
       },
     ),
+
+    GoRoute(
+      path: '/complete-profile',
+      builder: (context, state) =>
+          const CompleteProfileScreen(),
+    ),
+
     GoRoute(
       path: '/home',
       builder: (context, state) =>
           const HomeScreen(),
+    ),
+
+    GoRoute(
+      path: '/ride/:rideId',
+      builder: (context, state) {
+        final rideId =
+            state.pathParameters['rideId']!;
+
+        return RideSearchingScreen(
+          rideId: rideId,
+        );
+      },
     ),
   ],
 );

@@ -54,7 +54,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         return;
       }
 
-      context.go('/home');
+      context.go('/splash');
     } on DioException catch (error) {
       if (!mounted) {
         return;

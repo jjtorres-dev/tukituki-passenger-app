@@ -89,7 +89,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
         return;
       }
 
-      context.go('/home');
+      context.go('/splash');
     } on DioException catch (error) {
       if (!mounted) {
         return;
