@@ -221,7 +221,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                 TextButton(
                   onPressed: () {
-                    // Registro + OTP será el siguiente bloque.
+                    context.push('/register');
                   },
                   child: const Text(
                     '¿No tienes cuenta? Crear cuenta',

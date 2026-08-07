@@ -21,6 +21,55 @@ class AuthRepository {
   final Dio _dio;
   final FlutterSecureStorage _storage;
 
+  Future<void> registerPassenger({
+    required String phoneE164,
+    required String password,
+  }) async {
+    await _dio.post<Map<String, dynamic>>(
+      'auth/register/passenger',
+      data: {
+        'phoneE164': phoneE164,
+        'password': password,
+      },
+    );
+  }
+
+  Future<String?> requestOtp({
+    required String phoneE164,
+  }) async {
+    final response = await _dio.post<dynamic>(
+      'auth/otp/request',
+      data: {
+        'phoneE164': phoneE164,
+      },
+    );
+
+    final data = response.data;
+
+    if (data is Map) {
+      final debugOtp = data['debugOtp'];
+
+      if (debugOtp != null) {
+        return debugOtp.toString();
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> verifyOtp({
+    required String phoneE164,
+    required String code,
+  }) async {
+    await _dio.post<dynamic>(
+      'auth/otp/verify',
+      data: {
+        'phoneE164': phoneE164,
+        'code': code,
+      },
+    );
+  }
+
   Future<void> login({
     required String phoneE164,
     required String password,
@@ -36,7 +85,9 @@ class AuthRepository {
     final data = response.data;
 
     if (data == null) {
-      throw Exception('El backend devolvió una respuesta vacía.');
+      throw Exception(
+        'El backend devolvió una respuesta vacía.',
+      );
     }
 
     final accessToken = data['accessToken'] as String?;
@@ -46,7 +97,9 @@ class AuthRepository {
     if (accessToken == null ||
         refreshToken == null ||
         sessionId == null) {
-      throw Exception('La respuesta de inicio de sesión es inválida.');
+      throw Exception(
+        'La respuesta de inicio de sesión es inválida.',
+      );
     }
 
     await _storage.write(
@@ -78,8 +131,16 @@ class AuthRepository {
   }
 
   Future<void> clearSession() async {
-    await _storage.delete(key: StorageKeys.accessToken);
-    await _storage.delete(key: StorageKeys.refreshToken);
-    await _storage.delete(key: StorageKeys.sessionId);
+    await _storage.delete(
+      key: StorageKeys.accessToken,
+    );
+
+    await _storage.delete(
+      key: StorageKeys.refreshToken,
+    );
+
+    await _storage.delete(
+      key: StorageKeys.sessionId,
+    );
   }
 }
