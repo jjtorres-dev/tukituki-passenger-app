@@ -9,6 +9,7 @@ class FareEstimate {
     required this.expiresAt,
     required this.originAddress,
     required this.destinationAddress,
+    required this.routePolyline,
   });
 
   final String quoteId;
@@ -21,6 +22,15 @@ class FareEstimate {
   final String originAddress;
   final String destinationAddress;
 
+  /*
+   * Ruta real devuelta por Google Routes.
+   *
+   * Es opcional para mantener compatibilidad
+   * si alguna respuesta antigua todavía
+   * no incluye geometría.
+   */
+  final String? routePolyline;
+
   factory FareEstimate.fromJson(
     Map<String, dynamic> json,
   ) {
@@ -30,19 +40,44 @@ class FareEstimate {
     final destination =
         json['destination'] as Map<String, dynamic>;
 
+    final rawPolyline =
+        json['routePolyline'];
+
     return FareEstimate(
-      quoteId: json['quoteId'] as String,
-      quoteStatus: json['quoteStatus'] as String,
-      distanceMeters: json['distanceMeters'] as num,
-      durationSeconds: json['durationSeconds'] as num,
-      estimatedFare: json['estimatedFare'] as String,
-      currency: json['currency'] as String,
-      expiresAt: DateTime.parse(
+      quoteId:
+          json['quoteId'] as String,
+
+      quoteStatus:
+          json['quoteStatus'] as String,
+
+      distanceMeters:
+          json['distanceMeters'] as num,
+
+      durationSeconds:
+          json['durationSeconds'] as num,
+
+      estimatedFare:
+          json['estimatedFare'] as String,
+
+      currency:
+          json['currency'] as String,
+
+      expiresAt:
+          DateTime.parse(
         json['expiresAt'] as String,
       ),
-      originAddress: origin['address'] as String,
+
+      originAddress:
+          origin['address'] as String,
+
       destinationAddress:
           destination['address'] as String,
+
+      routePolyline:
+          rawPolyline is String &&
+                  rawPolyline.trim().isNotEmpty
+              ? rawPolyline.trim()
+              : null,
     );
   }
 }

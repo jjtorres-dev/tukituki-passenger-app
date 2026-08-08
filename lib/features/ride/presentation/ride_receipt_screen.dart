@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,7 +29,10 @@ class _RideReceiptScreenState
 
   RideReceipt? _receipt;
 
+  Timer? _paymentTimer;
+
   bool _loading = true;
+  bool _refreshingReceipt = false;
   bool _sendingRating = false;
   bool _rated = false;
 
@@ -42,30 +47,46 @@ class _RideReceiptScreenState
     'FRIENDLY': 'Amable',
     'CLEAN_VEHICLE': 'Vehículo limpio',
     'PUNCTUAL': 'Puntual',
-    'GOOD_COMMUNICATION': 'Buena comunicación',
+    'GOOD_COMMUNICATION':
+        'Buena comunicación',
     'RESPECTFUL': 'Respetuoso',
-    'CLEAR_PICKUP_POINT': 'Punto de recojo claro',
+    'CLEAR_PICKUP_POINT':
+        'Punto de recojo claro',
   };
 
   @override
   void initState() {
     super.initState();
 
-    _loadReceipt();
+    unawaited(
+      _loadReceipt(),
+    );
   }
 
   @override
   void dispose() {
+    _paymentTimer?.cancel();
+
     _commentController.dispose();
 
     super.dispose();
   }
 
-  Future<void> _loadReceipt() async {
+  Future<void> _loadReceipt({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _loading = true;
+      });
+    }
+
     try {
       final receipt = await ref
           .read(rideRepositoryProvider)
-          .getReceipt(widget.rideId);
+          .getReceipt(
+            widget.rideId,
+          );
 
       if (!mounted) {
         return;
@@ -76,6 +97,10 @@ class _RideReceiptScreenState
         _loading = false;
         _error = null;
       });
+
+      _configurePaymentPolling(
+        receipt,
+      );
     } catch (error) {
       debugPrint(
         'Error cargando recibo: $error',
@@ -93,8 +118,117 @@ class _RideReceiptScreenState
     }
   }
 
+  void _configurePaymentPolling(
+    RideReceipt receipt,
+  ) {
+    final status =
+        receipt.payment?.status;
+
+    if (status == 'PAID' ||
+        _isTerminalPaymentStatus(status)) {
+      _paymentTimer?.cancel();
+      _paymentTimer = null;
+
+      return;
+    }
+
+    if (_paymentTimer != null) {
+      return;
+    }
+
+    debugPrint(
+      'PASSENGER PAYMENT - '
+      'iniciando polling, status=$status',
+    );
+
+    _paymentTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) {
+        unawaited(
+          _refreshPayment(),
+        );
+      },
+    );
+  }
+
+  Future<void> _refreshPayment() async {
+    if (_refreshingReceipt) {
+      return;
+    }
+
+    _refreshingReceipt = true;
+
+    try {
+      final receipt = await ref
+          .read(rideRepositoryProvider)
+          .getReceipt(
+            widget.rideId,
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      final previousStatus =
+          _receipt?.payment?.status;
+
+      final newStatus =
+          receipt.payment?.status;
+
+      setState(() {
+        _receipt = receipt;
+      });
+
+      if (previousStatus != newStatus) {
+        debugPrint(
+          'PASSENGER PAYMENT '
+          '$previousStatus -> $newStatus',
+        );
+      }
+
+      _configurePaymentPolling(
+        receipt,
+      );
+    } catch (error) {
+      debugPrint(
+        'Error actualizando pago: $error',
+      );
+    } finally {
+      _refreshingReceipt = false;
+    }
+  }
+
+  bool _isTerminalPaymentStatus(
+    String? status,
+  ) {
+    return status == 'FAILED' ||
+        status == 'EXPIRED' ||
+        status == 'DISPUTED' ||
+        status == 'VOIDED';
+  }
+
+  bool get _paymentConfirmed {
+    return _receipt?.payment?.status ==
+        'PAID';
+  }
+
   Future<void> _submitRating() async {
-    if (_sendingRating || _rated) {
+    if (_sendingRating ||
+        _rated) {
+      return;
+    }
+
+    if (!_paymentConfirmed) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Espera a que el conductor '
+            'confirme el pago.',
+          ),
+        ),
+      );
+
       return;
     }
 
@@ -122,7 +256,8 @@ class _RideReceiptScreenState
         _rated = true;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
         const SnackBar(
           content: Text(
             '¡Gracias por tu calificación!',
@@ -135,24 +270,29 @@ class _RideReceiptScreenState
       }
 
       String message =
-          'No se pudo enviar la calificación.';
+          'No se pudo enviar '
+          'la calificación.';
 
-      if (error.response?.statusCode == 409) {
+      if (error.response?.statusCode ==
+          409) {
         message =
             'Este viaje ya fue calificado.';
 
         setState(() {
           _rated = true;
         });
-      } else if (error.response?.statusCode == 400) {
+      } else if (error.response?.statusCode ==
+          400) {
         message =
             'La calificación no es válida.';
       } else if (error.response == null) {
         message =
-            'No se pudo conectar con TukiTuki.';
+            'No se pudo conectar '
+            'con TukiTuki.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
         SnackBar(
           content: Text(message),
         ),
@@ -166,13 +306,30 @@ class _RideReceiptScreenState
     }
   }
 
+  String _formatDistance(
+    num meters,
+  ) {
+    return '${(meters / 1000).toStringAsFixed(1)} km';
+  }
+
+  String _formatDuration(
+    num seconds,
+  ) {
+    if (seconds < 60) {
+      return '${seconds.round()} s';
+    }
+
+    return '${(seconds / 60).round()} min';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(
         body: SafeArea(
           child: Center(
-            child: CircularProgressIndicator(),
+            child:
+                CircularProgressIndicator(),
           ),
         ),
       );
@@ -189,18 +346,25 @@ class _RideReceiptScreenState
         ),
         body: Center(
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding:
+                const EdgeInsets.all(24),
             child: Text(
               _error ??
-                  'No se encontró el recibo.',
-              textAlign: TextAlign.center,
+                  'No se encontró '
+                      'el recibo.',
+              textAlign:
+                  TextAlign.center,
             ),
           ),
         ),
       );
     }
 
-    final payment = receipt.payment;
+    final payment =
+        receipt.payment;
+
+    final paymentConfirmed =
+        payment?.status == 'PAID';
 
     return Scaffold(
       appBar: AppBar(
@@ -211,7 +375,8 @@ class _RideReceiptScreenState
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding:
+              const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment:
                 CrossAxisAlignment.stretch,
@@ -225,28 +390,35 @@ class _RideReceiptScreenState
 
               const Text(
                 '¡Gracias por viajar!',
-                textAlign: TextAlign.center,
+                textAlign:
+                    TextAlign.center,
                 style: TextStyle(
                   fontSize: 30,
-                  fontWeight: FontWeight.bold,
+                  fontWeight:
+                      FontWeight.bold,
                 ),
               ),
 
               const SizedBox(height: 12),
 
-              const Text(
-                'Total pagado',
-                textAlign: TextAlign.center,
+              Text(
+                paymentConfirmed
+                    ? 'Total pagado'
+                    : 'Total a pagar',
+                textAlign:
+                    TextAlign.center,
               ),
 
               const SizedBox(height: 6),
 
               Text(
-                'S/ ${receipt.fare.finalFare}',
-                textAlign: TextAlign.center,
+                'S/ ${payment?.amountDue ?? receipt.fare.finalFare}',
+                textAlign:
+                    TextAlign.center,
                 style: const TextStyle(
                   fontSize: 42,
-                  fontWeight: FontWeight.bold,
+                  fontWeight:
+                      FontWeight.bold,
                 ),
               ),
 
@@ -278,7 +450,8 @@ class _RideReceiptScreenState
                         title:
                             const Text('Destino'),
                         subtitle: Text(
-                          receipt.destinationAddress,
+                          receipt
+                              .destinationAddress,
                         ),
                       ),
 
@@ -286,14 +459,18 @@ class _RideReceiptScreenState
 
                       _ReceiptRow(
                         label: 'Distancia',
-                        value:
-                            '${(receipt.actualDistanceMeters / 1000).toStringAsFixed(1)} km',
+                        value: _formatDistance(
+                          receipt
+                              .actualDistanceMeters,
+                        ),
                       ),
 
                       _ReceiptRow(
                         label: 'Duración',
-                        value:
-                            '${(receipt.actualDurationSeconds / 60).round()} min',
+                        value: _formatDuration(
+                          receipt
+                              .actualDurationSeconds,
+                        ),
                       ),
                     ],
                   ),
@@ -353,6 +530,35 @@ class _RideReceiptScreenState
                           value:
                               'S/ ${payment!.changeGiven}',
                         ),
+
+                      if (!paymentConfirmed &&
+                          !_isTerminalPaymentStatus(
+                            payment?.status,
+                          )) ...[
+                        const SizedBox(
+                          height: 16,
+                        ),
+
+                        const Divider(),
+
+                        const SizedBox(
+                          height: 12,
+                        ),
+
+                        const LinearProgressIndicator(),
+
+                        const SizedBox(
+                          height: 14,
+                        ),
+
+                        const Text(
+                          'Esperando confirmación '
+                          'del pago por parte '
+                          'del conductor...',
+                          textAlign:
+                              TextAlign.center,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -360,156 +566,270 @@ class _RideReceiptScreenState
 
               const SizedBox(height: 28),
 
-              const Text(
-                '¿Cómo estuvo tu viaje?',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.center,
-                children: List.generate(
-                  5,
-                  (index) {
-                    final value = index + 1;
-
-                    return IconButton(
-                      onPressed: _rated
-                          ? null
-                          : () {
-                              setState(() {
-                                _score = value;
-                              });
-                            },
-                      iconSize: 42,
-                      icon: Icon(
-                        value <= _score
-                            ? Icons.star
-                            : Icons.star_border,
-                      ),
-                    );
-                  },
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              if (!_rated) ...[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment:
-                      WrapAlignment.center,
-                  children:
-                      _tags.entries.map(
-                    (entry) {
-                      final selected =
-                          _selectedTags.contains(
-                        entry.key,
-                      );
-
-                      return FilterChip(
-                        label: Text(
-                          entry.value,
-                        ),
-                        selected: selected,
-                        onSelected: (value) {
-                          setState(() {
-                            if (value) {
-                              if (_selectedTags
-                                      .length <
-                                  5) {
-                                _selectedTags.add(
-                                  entry.key,
-                                );
-                              }
-                            } else {
-                              _selectedTags.remove(
-                                entry.key,
-                              );
-                            }
-                          });
-                        },
-                      );
-                    },
-                  ).toList(),
-                ),
-
-                const SizedBox(height: 20),
-
-                TextField(
-                  controller:
-                      _commentController,
-                  maxLength: 500,
-                  maxLines: 3,
-                  decoration:
-                      const InputDecoration(
-                    labelText:
-                        'Comentario opcional',
-                    border:
-                        OutlineInputBorder(),
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                FilledButton.icon(
-                  onPressed: _sendingRating
-                      ? null
-                      : _submitRating,
-                  icon: _sendingRating
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child:
-                              CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Icon(
-                          Icons.star,
-                        ),
-                  label: Padding(
+              if (!paymentConfirmed &&
+                  !_isTerminalPaymentStatus(
+                    payment?.status,
+                  )) ...[
+                const Card(
+                  child: Padding(
                     padding:
-                        const EdgeInsets.symmetric(
-                      vertical: 16,
-                    ),
-                    child: Text(
-                      _sendingRating
-                          ? 'Enviando...'
-                          : 'Enviar calificación',
+                        EdgeInsets.all(24),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.payments_outlined,
+                          size: 54,
+                        ),
+
+                        SizedBox(
+                          height: 12,
+                        ),
+
+                        Text(
+                          'Esperando el pago',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight:
+                                FontWeight.bold,
+                          ),
+                        ),
+
+                        SizedBox(
+                          height: 8,
+                        ),
+
+                        Text(
+                          'Cuando el conductor '
+                          'confirme el efectivo, '
+                          'podrás calificar '
+                          'el viaje.',
+                          textAlign:
+                              TextAlign.center,
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ],
 
-              if (_rated) ...[
-                const Card(
+              if (paymentConfirmed) ...[
+                const Text(
+                  '¿Cómo estuvo tu viaje?',
+                  textAlign:
+                      TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight:
+                        FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.center,
+                  children: List.generate(
+                    5,
+                    (index) {
+                      final value =
+                          index + 1;
+
+                      return IconButton(
+                        onPressed: _rated
+                            ? null
+                            : () {
+                                setState(() {
+                                  _score =
+                                      value;
+                                });
+                              },
+                        iconSize: 42,
+                        disabledColor:
+                            value <= _score
+                                ? Theme.of(
+                                    context,
+                                  )
+                                    .colorScheme
+                                    .primary
+                                : Theme.of(
+                                    context,
+                                  )
+                                    .colorScheme
+                                    .outline,
+                        icon: Icon(
+                          value <= _score
+                              ? Icons.star
+                              : Icons
+                                  .star_border,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                if (!_rated) ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment:
+                        WrapAlignment.center,
+                    children:
+                        _tags.entries.map(
+                      (entry) {
+                        final selected =
+                            _selectedTags
+                                .contains(
+                          entry.key,
+                        );
+
+                        return FilterChip(
+                          label: Text(
+                            entry.value,
+                          ),
+                          selected:
+                              selected,
+                          onSelected:
+                              (value) {
+                            setState(() {
+                              if (value) {
+                                if (_selectedTags
+                                        .length <
+                                    5) {
+                                  _selectedTags
+                                      .add(
+                                    entry.key,
+                                  );
+                                }
+                              } else {
+                                _selectedTags
+                                    .remove(
+                                  entry.key,
+                                );
+                              }
+                            });
+                          },
+                        );
+                      },
+                    ).toList(),
+                  ),
+
+                  const SizedBox(
+                    height: 20,
+                  ),
+
+                  TextField(
+                    controller:
+                        _commentController,
+                    maxLength: 500,
+                    maxLines: 3,
+                    decoration:
+                        const InputDecoration(
+                      labelText:
+                          'Comentario opcional',
+                      border:
+                          OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(
+                    height: 16,
+                  ),
+
+                  FilledButton.icon(
+                    onPressed:
+                        _sendingRating
+                            ? null
+                            : _submitRating,
+                    icon: _sendingRating
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child:
+                                CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.star,
+                          ),
+                    label: Padding(
+                      padding:
+                          const EdgeInsets
+                              .symmetric(
+                        vertical: 16,
+                      ),
+                      child: Text(
+                        _sendingRating
+                            ? 'Enviando...'
+                            : 'Enviar calificación',
+                      ),
+                    ),
+                  ),
+                ],
+
+                if (_rated) ...[
+                  const Card(
+                    child: Padding(
+                      padding:
+                          EdgeInsets.all(
+                        20,
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.favorite,
+                            size: 50,
+                          ),
+                          SizedBox(
+                            height: 10,
+                          ),
+                          Text(
+                            '¡Gracias por '
+                            'calificarnos!',
+                            textAlign:
+                                TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight:
+                                  FontWeight
+                                      .bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+
+              if (_isTerminalPaymentStatus(
+                payment?.status,
+              )) ...[
+                Card(
                   child: Padding(
                     padding:
-                        EdgeInsets.all(20),
+                        const EdgeInsets.all(
+                      20,
+                    ),
                     child: Column(
                       children: [
-                        Icon(
-                          Icons.favorite,
-                          size: 50,
+                        const Icon(
+                          Icons.warning_amber,
+                          size: 48,
                         ),
-                        SizedBox(height: 10),
+
+                        const SizedBox(
+                          height: 12,
+                        ),
+
                         Text(
-                          '¡Gracias por calificarnos!',
+                          'El pago está en estado '
+                          '${payment?.status}.',
                           textAlign:
                               TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight:
-                                FontWeight.bold,
-                          ),
                         ),
                       ],
                     ),
@@ -519,23 +839,25 @@ class _RideReceiptScreenState
 
               const SizedBox(height: 24),
 
-              OutlinedButton.icon(
-                onPressed: () {
-                  context.go('/home');
-                },
-                icon: const Icon(
-                  Icons.home,
-                ),
-                label: const Padding(
-                  padding:
-                      EdgeInsets.symmetric(
-                    vertical: 16,
+              if (paymentConfirmed &&
+                  _rated)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    context.go('/home');
+                  },
+                  icon: const Icon(
+                    Icons.home,
                   ),
-                  child: Text(
-                    'Volver al inicio',
+                  label: const Padding(
+                    padding:
+                        EdgeInsets.symmetric(
+                      vertical: 16,
+                    ),
+                    child: Text(
+                      'Volver al inicio',
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -567,11 +889,14 @@ class _ReceiptRow extends StatelessWidget {
           Expanded(
             child: Text(label),
           ),
+
           const SizedBox(width: 16),
+
           Text(
             value,
             style: const TextStyle(
-              fontWeight: FontWeight.bold,
+              fontWeight:
+                  FontWeight.bold,
             ),
           ),
         ],

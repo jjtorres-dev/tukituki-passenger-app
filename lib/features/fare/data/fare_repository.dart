@@ -16,23 +16,29 @@ class FareRepository {
 
   final Dio _dio;
 
-  Future<FareEstimate> estimateRide() async {
+  Future<FareEstimate> estimateRide({
+    required double originLatitude,
+    required double originLongitude,
+    required double destinationLatitude,
+    required double destinationLongitude,
+    required String destinationAddress,
+    String originAddress =
+        'Ubicación actual del pasajero',
+  }) async {
     final response =
         await _dio.post<Map<String, dynamic>>(
       'fares/estimate',
       data: {
         'origin': {
-          'latitude': -6.4877,
-          'longitude': -76.3599,
-          'address': 'Centro de Tarapoto',
+          'latitude': originLatitude,
+          'longitude': originLongitude,
+          'address': originAddress,
         },
         'destination': {
-          'latitude': -6.4685,
-          'longitude': -76.3430,
-          'address': 'Destino de prueba Tarapoto',
+          'latitude': destinationLatitude,
+          'longitude': destinationLongitude,
+          'address': destinationAddress,
         },
-        'distanceMeters': 3200,
-        'durationSeconds': 720,
         'isNight': false,
         'isRaining': false,
       },
