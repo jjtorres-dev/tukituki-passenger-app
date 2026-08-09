@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,30 +13,78 @@ class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  ConsumerState<SplashScreen> createState() =>
-      _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState
-    extends ConsumerState<SplashScreen> {
+class _SplashScreenState extends ConsumerState<SplashScreen> {
+  bool _checking = true;
+  String? _errorMessage;
+
+  Timer? _initialDelayTimer;
+  Completer<void>? _initialDelayCompleter;
+
   @override
   void initState() {
     super.initState();
-
-    _checkSession();
+    unawaited(_checkSession());
   }
 
-  Future<void> _checkSession() async {
-    await Future.delayed(
-      const Duration(milliseconds: 800),
-    );
+  @override
+  void dispose() {
+    _initialDelayTimer?.cancel();
+    _initialDelayTimer = null;
+
+    final completer = _initialDelayCompleter;
+    _initialDelayCompleter = null;
+
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+
+    super.dispose();
+  }
+
+  Future<void> _waitInitialDelay() {
+    _initialDelayTimer?.cancel();
+
+    final completer = Completer<void>();
+    _initialDelayCompleter = completer;
+
+    _initialDelayTimer = Timer(const Duration(milliseconds: 800), () {
+      _initialDelayTimer = null;
+
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+
+      if (identical(_initialDelayCompleter, completer)) {
+        _initialDelayCompleter = null;
+      }
+    });
+
+    return completer.future;
+  }
+
+  Future<void> _checkSession({bool initialDelay = true}) async {
+    if (mounted) {
+      setState(() {
+        _checking = true;
+        _errorMessage = null;
+      });
+    }
+
+    if (initialDelay) {
+      await _waitInitialDelay();
+
+      if (!mounted) {
+        return;
+      }
+    }
 
     try {
-      final authRepository =
-          ref.read(authRepositoryProvider);
+      final authRepository = ref.read(authRepositoryProvider);
 
-      final hasSession =
-          await authRepository.hasSession();
+      final hasSession = await authRepository.hasSession();
 
       if (!mounted) {
         return;
@@ -44,29 +95,19 @@ class _SplashScreenState
         return;
       }
 
-      final user =
-          await authRepository.getMe();
+      final user = await authRepository.getMe();
 
       if (!mounted) {
         return;
       }
 
-      final isPassenger =
-          user.roles.contains('PASSENGER');
+      final isPassenger = user.roles.contains('PASSENGER');
 
       final isValidPassenger =
-          user.status == 'ACTIVE' &&
-          user.isPhoneVerified &&
-          isPassenger;
+          user.status == 'ACTIVE' && user.isPhoneVerified && isPassenger;
 
       if (!isValidPassenger) {
-        await authRepository.clearSession();
-
-        if (!mounted) {
-          return;
-        }
-
-        context.go('/login');
+        await _clearSessionAndGoToLogin(authRepository);
         return;
       }
 
@@ -83,72 +124,146 @@ class _SplashScreenState
         return;
       }
 
-      // IMPORTANTE:
-      // Antes de ir al Home comprobamos
-      // si este pasajero ya tiene un viaje activo.
-      final activeRide = await ref
-          .read(rideRepositoryProvider)
-          .getActiveRide();
+      final activeRide = await ref.read(rideRepositoryProvider).getActiveRide();
 
       if (!mounted) {
         return;
       }
 
       if (activeRide != null) {
-        context.go(
-          '/ride/${activeRide.id}',
-        );
+        context.go('/ride/${activeRide.id}');
         return;
       }
 
       context.go('/home');
-    } catch (error) {
+    } on DioException catch (error) {
       debugPrint(
-        'Error restaurando sesión del pasajero: $error',
+        'Error HTTP restaurando sesión del pasajero: '
+        '${error.response?.statusCode} '
+        '${error.requestOptions.path} '
+        '${error.type}',
       );
 
-      await ref
-          .read(authRepositoryProvider)
-          .clearSession();
+      if (error.response?.statusCode == 401) {
+        final authRepository = ref.read(authRepositoryProvider);
 
-      if (!mounted) {
+        await _clearSessionAndGoToLogin(authRepository);
         return;
       }
 
-      context.go('/login');
+      _showRecoverableError(_messageForDioError(error));
+    } catch (error) {
+      debugPrint('Error restaurando sesión del pasajero: $error');
+
+      // Un error de parsing, almacenamiento, backend,
+      // perfil o viaje no demuestra por sí solo que la
+      // sesión haya dejado de ser válida.
+      //
+      // Conservamos las credenciales y permitimos
+      // reintentar.
+      _showRecoverableError(
+        'No pudimos recuperar tu sesión en este momento. '
+        'Intenta nuevamente.',
+      );
+    }
+  }
+
+  Future<void> _clearSessionAndGoToLogin(AuthRepository authRepository) async {
+    try {
+      await authRepository.clearSession();
+    } catch (error) {
+      debugPrint(
+        'No se pudo limpiar completamente '
+        'la sesión local: $error',
+      );
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    context.go('/login');
+  }
+
+  void _showRecoverableError(String message) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _checking = false;
+      _errorMessage = message;
+    });
+  }
+
+  String _messageForDioError(DioException error) {
+    switch (error.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return 'TukiTuki está tardando más de lo esperado. '
+            'Tu sesión se mantiene guardada.';
+
+      case DioExceptionType.connectionError:
+        return 'No pudimos conectarnos con TukiTuki. '
+            'Revisa tu conexión e intenta nuevamente.';
+
+      default:
+        final statusCode = error.response?.statusCode;
+
+        if (statusCode != null && statusCode >= 500) {
+          return 'El servidor de TukiTuki no está disponible '
+              'temporalmente. Tu sesión se mantiene guardada.';
+        }
+
+        return 'No pudimos recuperar tu sesión en este momento. '
+            'Intenta nuevamente.';
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       body: SafeArea(
         child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.two_wheeler,
-                size: 84,
-              ),
-              SizedBox(height: 20),
-              Text(
-                'TukiTuki',
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.two_wheeler, size: 84),
+                const SizedBox(height: 20),
+                const Text(
+                  'TukiTuki',
+                  style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
                 ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Recuperando tu viaje...',
-                style: TextStyle(
-                  fontSize: 16,
+                const SizedBox(height: 8),
+                Text(
+                  _checking
+                      ? 'Recuperando tu viaje...'
+                      : 'No pudimos continuar',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16),
                 ),
-              ),
-              SizedBox(height: 32),
-              CircularProgressIndicator(),
-            ],
+                const SizedBox(height: 24),
+                if (_checking)
+                  const CircularProgressIndicator()
+                else ...[
+                  Text(
+                    _errorMessage ?? 'No pudimos recuperar tu sesión.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: () {
+                      unawaited(_checkSession(initialDelay: false));
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Reintentar'),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),

@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
-import '../domain/public_user.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/storage/secure_storage.dart';
+import '../domain/public_user.dart';
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository(
@@ -38,7 +38,7 @@ class AuthRepository {
   Future<String?> requestOtp({
     required String phoneE164,
   }) async {
-    final response = await _dio.post<dynamic>(
+    final response = await _dio.post(
       'auth/otp/request',
       data: {
         'phoneE164': phoneE164,
@@ -62,7 +62,7 @@ class AuthRepository {
     required String phoneE164,
     required String code,
   }) async {
-    await _dio.post<dynamic>(
+    await _dio.post(
       'auth/otp/verify',
       data: {
         'phoneE164': phoneE164,
@@ -96,27 +96,35 @@ class AuthRepository {
     final sessionId = data['sessionId'] as String?;
 
     if (accessToken == null ||
+        accessToken.isEmpty ||
         refreshToken == null ||
-        sessionId == null) {
+        refreshToken.isEmpty ||
+        sessionId == null ||
+        sessionId.isEmpty) {
       throw Exception(
         'La respuesta de inicio de sesión es inválida.',
       );
     }
 
-    await _storage.write(
-      key: StorageKeys.accessToken,
-      value: accessToken,
-    );
+    try {
+      await _storage.write(
+        key: StorageKeys.accessToken,
+        value: accessToken,
+      );
 
-    await _storage.write(
-      key: StorageKeys.refreshToken,
-      value: refreshToken,
-    );
+      await _storage.write(
+        key: StorageKeys.refreshToken,
+        value: refreshToken,
+      );
 
-    await _storage.write(
-      key: StorageKeys.sessionId,
-      value: sessionId,
-    );
+      await _storage.write(
+        key: StorageKeys.sessionId,
+        value: sessionId,
+      );
+    } catch (_) {
+      await clearSession();
+      rethrow;
+    }
   }
 
   Future<bool> hasSession() async {
@@ -128,7 +136,16 @@ class AuthRepository {
       key: StorageKeys.refreshToken,
     );
 
-    return accessToken != null && refreshToken != null;
+    final sessionId = await _storage.read(
+      key: StorageKeys.sessionId,
+    );
+
+    return accessToken != null &&
+        accessToken.isNotEmpty &&
+        refreshToken != null &&
+        refreshToken.isNotEmpty &&
+        sessionId != null &&
+        sessionId.isNotEmpty;
   }
 
   Future<PublicUser> getMe() async {
@@ -153,6 +170,10 @@ class AuthRepository {
       await _dio.post<void>(
         'auth/logout',
       );
+    } on DioException {
+      // El cierre remoto es best-effort.
+      // Aunque el token esté vencido, Railway no responda
+      // o el backend devuelva 401, la sesión local debe cerrarse.
     } finally {
       await clearSession();
     }

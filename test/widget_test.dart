@@ -4,12 +4,8 @@ import 'package:passenger/app.dart';
 
 void main() {
   testWidgets('TukiTuki app inicia correctamente', (tester) async {
-    await tester.pumpWidget(
-      const ProviderScope(
-        child: TukiTukiApp(),
-      ),
-    );
+    await tester.pumpWidget(const ProviderScope(child: TukiTukiApp()));
 
-    expect(find.text('TukiTuki Passenger'), findsOneWidget);
+    expect(find.text('TukiTuki'), findsOneWidget);
   });
 }
