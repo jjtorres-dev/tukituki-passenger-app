@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
 import '../domain/passenger_ride.dart';
+import '../domain/passenger_ride_offer.dart';
 import '../domain/passenger_ride_start_code.dart';
 import '../domain/ride_receipt.dart';
 
@@ -20,12 +21,14 @@ class RideRepository {
 
   Future<PassengerRide> createRide({
     required String fareQuoteId,
+    required String passengerOfferFare,
   }) async {
     final response =
         await _dio.post<Map<String, dynamic>>(
       'passenger/rides',
       data: {
         'fareQuoteId': fareQuoteId,
+        'passengerOfferFare': passengerOfferFare,
         'paymentMethod': 'CASH',
       },
     );
@@ -77,6 +80,54 @@ class RideRepository {
     if (data == null) {
       throw Exception(
         'El viaje no pudo ser consultado.',
+      );
+    }
+
+    return PassengerRide.fromJson(data);
+  }
+
+  Future<List<PassengerRideOffer>> getRideOffers(
+    String rideId,
+  ) async {
+    final response =
+        await _dio.get<List<dynamic>>(
+      'passenger/rides/$rideId/offers',
+    );
+
+    final data =
+        response.data ?? const <dynamic>[];
+
+    final offers = <PassengerRideOffer>[];
+
+    for (final item in data) {
+      if (item is! Map) {
+        continue;
+      }
+
+      offers.add(
+        PassengerRideOffer.fromJson(
+          Map<String, dynamic>.from(item),
+        ),
+      );
+    }
+
+    return offers;
+  }
+
+  Future<PassengerRide> selectRideOffer({
+    required String rideId,
+    required String offerId,
+  }) async {
+    final response =
+        await _dio.post<Map<String, dynamic>>(
+      'passenger/rides/$rideId/offers/$offerId/select',
+    );
+
+    final data = response.data;
+
+    if (data == null) {
+      throw Exception(
+        'El backend devolvió una respuesta vacía.',
       );
     }
 

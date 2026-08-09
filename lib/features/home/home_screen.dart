@@ -40,6 +40,10 @@ class _HomeScreenState
       _destinationSearchController =
       TextEditingController();
 
+  final TextEditingController
+      _passengerOfferController =
+      TextEditingController();
+
   final FocusNode _destinationSearchFocusNode =
       FocusNode();
 
@@ -82,6 +86,7 @@ class _HomeScreenState
   void dispose() {
     _searchDebounce?.cancel();
     _destinationSearchController.dispose();
+    _passengerOfferController.dispose();
     _destinationSearchFocusNode.dispose();
     _mapController?.dispose();
 
@@ -950,6 +955,9 @@ class _HomeScreenState
                   encodedPolyline,
                 );
 
+      _passengerOfferController.text =
+          quote.estimatedFare;
+
       setState(() {
         _quote = quote;
         _routePoints = routePoints;
@@ -1027,6 +1035,50 @@ class _HomeScreenState
       return;
     }
 
+    final rawOffer =
+        _passengerOfferController.text
+            .trim()
+            .replaceAll(',', '.');
+
+    final passengerOffer =
+        double.tryParse(rawOffer);
+
+    if (passengerOffer == null ||
+        passengerOffer <= 0 ||
+        passengerOffer > 9999.99) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Ingresa un monto válido para tu oferta.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    final decimalParts = rawOffer.split('.');
+
+    if (decimalParts.length > 2 ||
+        (decimalParts.length == 2 &&
+            decimalParts[1].length > 2)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'La oferta puede tener como máximo '
+            '2 decimales.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    final normalizedPassengerOffer =
+        passengerOffer.toStringAsFixed(2);
+
     setState(() {
       _requestingRide = true;
     });
@@ -1037,6 +1089,8 @@ class _HomeScreenState
           .createRide(
             fareQuoteId:
                 quote.quoteId,
+            passengerOfferFare:
+                normalizedPassengerOffer,
           );
 
       if (!mounted) {
@@ -1725,6 +1779,17 @@ class _HomeScreenState
                                     20,
                               ),
 
+                              const Text(
+                                'Precio recomendado TukiTuki',
+                                textAlign:
+                                    TextAlign.center,
+                              ),
+
+                              const SizedBox(
+                                height:
+                                    6,
+                              ),
+
                               Text(
                                 'S/ ${quote.estimatedFare}',
                                 textAlign:
@@ -1732,9 +1797,68 @@ class _HomeScreenState
                                 style:
                                     const TextStyle(
                                   fontSize:
-                                      38,
+                                      32,
                                   fontWeight:
                                       FontWeight.bold,
+                                ),
+                              ),
+
+                              const SizedBox(
+                                height:
+                                    20,
+                              ),
+
+                              const Text(
+                                '¿Cuánto quieres ofrecer?',
+                                style:
+                                    TextStyle(
+                                  fontSize:
+                                      17,
+                                  fontWeight:
+                                      FontWeight.w600,
+                                ),
+                              ),
+
+                              const SizedBox(
+                                height:
+                                    8,
+                              ),
+
+                              TextField(
+                                controller:
+                                    _passengerOfferController,
+
+                                enabled:
+                                    !_requestingRide,
+
+                                keyboardType:
+                                    const TextInputType
+                                        .numberWithOptions(
+                                  decimal:
+                                      true,
+                                ),
+
+                                textAlign:
+                                    TextAlign.center,
+
+                                style:
+                                    const TextStyle(
+                                  fontSize:
+                                      28,
+                                  fontWeight:
+                                      FontWeight.bold,
+                                ),
+
+                                decoration:
+                                    const InputDecoration(
+                                  prefixText:
+                                      'S/ ',
+                                  hintText:
+                                      '5.00',
+                                  border:
+                                      OutlineInputBorder(),
+                                  helperText:
+                                      'Este es el monto que verán los conductores.',
                                 ),
                               ),
 
@@ -1861,7 +1985,7 @@ class _HomeScreenState
                                     Text(
                                   _requestingRide
                                       ? 'Solicitando...'
-                                      : 'Solicitar TukiTuki',
+                                      : 'Ofrecer y buscar conductor',
                                 ),
                               ),
                             ],

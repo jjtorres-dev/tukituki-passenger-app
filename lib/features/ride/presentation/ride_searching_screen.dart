@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/ride_repository.dart';
 import '../domain/passenger_ride.dart';
+import '../domain/passenger_ride_offer.dart';
 import '../domain/passenger_ride_start_code.dart';
 
 class RideSearchingScreen extends ConsumerStatefulWidget {
@@ -26,12 +28,16 @@ class _RideSearchingScreenState
   PassengerRide? _ride;
   PassengerRideStartCode? _startCode;
 
+  List<PassengerRideOffer> _offers = const [];
+
   Timer? _timer;
 
   bool _loading = true;
   bool _loadingStartCode = false;
+  bool _loadingOffers = false;
   bool _navigatingAway = false;
 
+  String? _selectingOfferId;
   String? _error;
 
   @override
@@ -86,6 +92,14 @@ class _RideSearchingScreenState
         _loading = false;
         _error = null;
       });
+
+      if (ride.status == 'SEARCHING_DRIVER') {
+        await _loadRideOffers(ride.id);
+      } else if (_offers.isNotEmpty) {
+        setState(() {
+          _offers = const [];
+        });
+      }
 
       // IMPORTANTE:
       // Si el backend ya marcó el viaje
@@ -149,6 +163,133 @@ class _RideSearchingScreenState
         _error =
             'No se pudo actualizar el viaje.';
       });
+    }
+  }
+
+  Future<void> _loadRideOffers(
+    String rideId,
+  ) async {
+    if (_loadingOffers ||
+        _navigatingAway ||
+        _selectingOfferId != null) {
+      return;
+    }
+
+    _loadingOffers = true;
+
+    try {
+      final offers = await ref
+          .read(rideRepositoryProvider)
+          .getRideOffers(rideId);
+
+      if (!mounted || _navigatingAway) {
+        return;
+      }
+
+      setState(() {
+        _offers = offers;
+      });
+    } on DioException catch (error) {
+      debugPrint(
+        'PASSENGER OFFERS ERROR '
+        'status=${error.response?.statusCode} '
+        'data=${error.response?.data}',
+      );
+
+      if (error.response?.statusCode != 409 &&
+          error.response?.statusCode != 404 &&
+          mounted) {
+        setState(() {
+          _error =
+              'No se pudieron actualizar '
+              'las propuestas de conductores.';
+        });
+      }
+    } catch (error) {
+      debugPrint(
+        'PASSENGER OFFERS ERROR inesperado: $error',
+      );
+    } finally {
+      _loadingOffers = false;
+    }
+  }
+
+  Future<void> _selectOffer(
+    PassengerRideOffer offer,
+  ) async {
+    if (_selectingOfferId != null ||
+        _navigatingAway) {
+      return;
+    }
+
+    setState(() {
+      _selectingOfferId = offer.offerId;
+    });
+
+    try {
+      final ride = await ref
+          .read(rideRepositoryProvider)
+          .selectRideOffer(
+            rideId: widget.rideId,
+            offerId: offer.offerId,
+          );
+
+      if (!mounted || _navigatingAway) {
+        return;
+      }
+
+      setState(() {
+        _ride = ride;
+        _offers = const [];
+        _error = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Elegiste a ${offer.driverDisplayName} '
+            'por S/ ${offer.proposedFare}.',
+          ),
+        ),
+      );
+    } on DioException catch (error) {
+      debugPrint(
+        'PASSENGER SELECT OFFER ERROR '
+        'status=${error.response?.statusCode} '
+        'data=${error.response?.data}',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      String message =
+          'No se pudo elegir este conductor.';
+
+      if (error.response?.statusCode == 409) {
+        message =
+            'Esta propuesta ya no está disponible.';
+      } else if (error.response?.statusCode == 404) {
+        message =
+            'No encontramos esta propuesta.';
+      } else if (error.response == null) {
+        message =
+            'No se pudo conectar con TukiTuki.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
+
+      await _loadRide();
+    } finally {
+      if (mounted && !_navigatingAway) {
+        setState(() {
+          _selectingOfferId = null;
+        });
+      }
     }
   }
 
@@ -269,6 +410,55 @@ class _RideSearchingScreenState
     }
   }
 
+  String _formatDriverDistance(
+    num distanceMeters,
+  ) {
+    if (distanceMeters < 1000) {
+      return '${distanceMeters.round()} m';
+    }
+
+    return '${(distanceMeters / 1000).toStringAsFixed(1)} km';
+  }
+
+  Widget _buildDriverAvatar(
+    PassengerRideOffer offer,
+  ) {
+    final photoUrl = offer.photoUrl;
+
+    if (photoUrl == null ||
+        photoUrl.trim().isEmpty) {
+      return const CircleAvatar(
+        radius: 28,
+        child: Icon(
+          Icons.person,
+          size: 30,
+        ),
+      );
+    }
+
+    return ClipOval(
+      child: Image.network(
+        photoUrl,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (
+          context,
+          error,
+          stackTrace,
+        ) {
+          return const CircleAvatar(
+            radius: 28,
+            child: Icon(
+              Icons.person,
+              size: 30,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -349,14 +539,30 @@ class _RideSearchingScreenState
 
               const SizedBox(height: 16),
 
-              Text(
-                'S/ ${ride.estimatedPassengerFare}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
+              if (ride.status == 'SEARCHING_DRIVER') ...[
+                const Text(
+                  'Tu oferta',
+                  textAlign: TextAlign.center,
                 ),
-              ),
+                const SizedBox(height: 6),
+                Text(
+                  'S/ ${ride.passengerOfferFare}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ] else ...[
+                Text(
+                  'S/ ${ride.agreedFare ?? ride.passengerOfferFare}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 32),
 
@@ -404,6 +610,191 @@ class _RideSearchingScreenState
                 '${(ride.estimatedDurationSeconds / 60).round()} min',
                 textAlign: TextAlign.center,
               ),
+
+              if (ride.status == 'SEARCHING_DRIVER') ...[
+                const SizedBox(height: 32),
+
+                const Text(
+                  'Conductores interesados',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                if (_offers.isEmpty)
+                  Card(
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.all(20),
+                      child: Column(
+                        children: [
+                          if (_loadingOffers) ...[
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 16),
+                          ],
+                          const Text(
+                            'Esperando propuestas de '
+                            'conductores cercanos...',
+                            textAlign:
+                                TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  for (final offer in _offers) ...[
+                    Card(
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.all(18),
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                _buildDriverAvatar(
+                                  offer,
+                                ),
+
+                                const SizedBox(
+                                  width: 14,
+                                ),
+
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        offer.driverDisplayName,
+                                        style:
+                                            const TextStyle(
+                                          fontSize: 19,
+                                          fontWeight:
+                                              FontWeight.bold,
+                                        ),
+                                      ),
+
+                                      const SizedBox(
+                                        height: 5,
+                                      ),
+
+                                      Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.star,
+                                            size: 18,
+                                          ),
+                                          const SizedBox(
+                                            width: 4,
+                                          ),
+                                          Expanded(
+                                            child: Text(
+                                              offer.ratingCount > 0
+                                                  ? '${offer.ratingAverage.toStringAsFixed(1)} '
+                                                      '(${offer.ratingCount})'
+                                                  : 'Conductor nuevo',
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+
+                                      const SizedBox(
+                                        height: 5,
+                                      ),
+
+                                      Text(
+                                        'A ${_formatDriverDistance(offer.distanceToOriginMeters)} '
+                                        'de tu punto de recojo',
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 18),
+
+                            Text(
+                              offer.isCounterOffer
+                                  ? 'Contraoferta del conductor'
+                                  : 'Acepta tu precio',
+                              textAlign:
+                                  TextAlign.center,
+                            ),
+
+                            const SizedBox(height: 6),
+
+                            Text(
+                              'S/ ${offer.proposedFare}',
+                              textAlign:
+                                  TextAlign.center,
+                              style:
+                                  const TextStyle(
+                                fontSize: 30,
+                                fontWeight:
+                                    FontWeight.bold,
+                              ),
+                            ),
+
+                            if (offer.isCounterOffer) ...[
+                              const SizedBox(
+                                height: 4,
+                              ),
+                              Text(
+                                'Tu oferta fue '
+                                'S/ ${offer.passengerOfferFare}',
+                                textAlign:
+                                    TextAlign.center,
+                                style:
+                                    const TextStyle(
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+
+                            const SizedBox(height: 16),
+
+                            FilledButton(
+                              onPressed:
+                                  _selectingOfferId != null
+                                      ? null
+                                      : () =>
+                                          _selectOffer(offer),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                child:
+                                    _selectingOfferId ==
+                                            offer.offerId
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child:
+                                                CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Text(
+                                            'Elegir conductor',
+                                          ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+                  ],
+              ],
 
               if (ride.status ==
                   'DRIVER_ARRIVED') ...[

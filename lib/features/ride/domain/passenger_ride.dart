@@ -7,6 +7,8 @@ class PassengerRide {
     required this.estimatedDurationSeconds,
     required this.estimatedFare,
     required this.estimatedPassengerFare,
+    required this.passengerOfferFare,
+    required this.agreedFare,
     required this.currency,
     required this.paymentMethod,
     required this.originAddress,
@@ -24,6 +26,8 @@ class PassengerRide {
 
   final String estimatedFare;
   final String estimatedPassengerFare;
+  final String passengerOfferFare;
+  final String? agreedFare;
 
   final String currency;
   final String paymentMethod;
@@ -50,6 +54,10 @@ class PassengerRide {
         json['estimatedPassengerFare']?.toString() ??
             estimatedFare;
 
+    final passengerOfferFare =
+        json['passengerOfferFare']?.toString() ??
+            estimatedFare;
+
     final requestedAtValue =
         json['requestedAt']?.toString();
 
@@ -73,6 +81,12 @@ class PassengerRide {
 
       estimatedPassengerFare:
           estimatedPassengerFare,
+
+      passengerOfferFare:
+          passengerOfferFare,
+
+      agreedFare:
+          json['agreedFare']?.toString(),
 
       currency:
           json['currency']?.toString() ?? 'PEN',
