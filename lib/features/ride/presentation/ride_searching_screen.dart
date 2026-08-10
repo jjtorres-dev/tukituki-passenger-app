@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/ride_repository.dart';
+import '../domain/fare_amount.dart';
 import '../domain/passenger_ride.dart';
 import '../domain/passenger_ride_offer.dart';
 import '../domain/passenger_ride_start_code.dart';
+import '../domain/ride_offer_filter.dart';
 
 class RideSearchingScreen extends ConsumerStatefulWidget {
   const RideSearchingScreen({
@@ -33,9 +35,12 @@ class _RideSearchingScreenState
   Timer? _timer;
 
   bool _loading = true;
+  bool _loadingRide = false;
   bool _loadingStartCode = false;
   bool _loadingOffers = false;
   bool _navigatingAway = false;
+
+  int _stateGeneration = 0;
 
   String? _selectingOfferId;
   String? _error;
@@ -59,9 +64,14 @@ class _RideSearchingScreenState
   }
 
   Future<void> _loadRide() async {
-    if (_navigatingAway) {
+    if (_navigatingAway ||
+        _loadingRide ||
+        _selectingOfferId != null) {
       return;
     }
+
+    final requestGeneration = _stateGeneration;
+    _loadingRide = true;
 
     try {
       final repository =
@@ -73,6 +83,10 @@ class _RideSearchingScreenState
       final activeRide =
           await repository.getActiveRide();
 
+      if (!_canApplyGeneration(requestGeneration)) {
+        return;
+      }
+
       PassengerRide ride;
 
       if (activeRide != null) {
@@ -83,7 +97,7 @@ class _RideSearchingScreenState
         );
       }
 
-      if (!mounted || _navigatingAway) {
+      if (!_canApplyGeneration(requestGeneration)) {
         return;
       }
 
@@ -94,11 +108,18 @@ class _RideSearchingScreenState
       });
 
       if (ride.status == 'SEARCHING_DRIVER') {
-        await _loadRideOffers(ride.id);
+        await _loadRideOffers(
+          ride.id,
+          generation: requestGeneration,
+        );
       } else if (_offers.isNotEmpty) {
         setState(() {
           _offers = const [];
         });
+      }
+
+      if (!_canApplyGeneration(requestGeneration)) {
+        return;
       }
 
       // IMPORTANTE:
@@ -154,7 +175,7 @@ class _RideSearchingScreenState
         'Error actualizando viaje del pasajero: $error',
       );
 
-      if (!mounted || _navigatingAway) {
+      if (!_canApplyGeneration(requestGeneration)) {
         return;
       }
 
@@ -163,12 +184,21 @@ class _RideSearchingScreenState
         _error =
             'No se pudo actualizar el viaje.';
       });
+    } finally {
+      _loadingRide = false;
     }
   }
 
+  bool _canApplyGeneration(int generation) {
+    return mounted &&
+        !_navigatingAway &&
+        generation == _stateGeneration;
+  }
+
   Future<void> _loadRideOffers(
-    String rideId,
-  ) async {
+    String rideId, {
+    required int generation,
+  }) async {
     if (_loadingOffers ||
         _navigatingAway ||
         _selectingOfferId != null) {
@@ -182,12 +212,15 @@ class _RideSearchingScreenState
           .read(rideRepositoryProvider)
           .getRideOffers(rideId);
 
-      if (!mounted || _navigatingAway) {
+      if (!_canApplyGeneration(generation) ||
+          _selectingOfferId != null ||
+          _ride?.id != rideId ||
+          _ride?.status != 'SEARCHING_DRIVER') {
         return;
       }
 
       setState(() {
-        _offers = offers;
+        _offers = visibleRideOffers(offers);
       });
     } on DioException catch (error) {
       debugPrint(
@@ -196,9 +229,17 @@ class _RideSearchingScreenState
         'data=${error.response?.data}',
       );
 
-      if (error.response?.statusCode != 409 &&
-          error.response?.statusCode != 404 &&
-          mounted) {
+      final statusCode = error.response?.statusCode;
+
+      if ((statusCode == 404 ||
+              statusCode == 409) &&
+          _canApplyGeneration(generation)) {
+        setState(() {
+          _offers = const [];
+        });
+      } else if (statusCode != 409 &&
+          statusCode != 404 &&
+          _canApplyGeneration(generation)) {
         setState(() {
           _error =
               'No se pudieron actualizar '
@@ -222,6 +263,53 @@ class _RideSearchingScreenState
       return;
     }
 
+    final currentRide = _ride;
+    final currentRideId = currentRide?.id.trim();
+
+    if (currentRideId == null ||
+        currentRideId.isEmpty ||
+        offer.rideId.trim().isEmpty ||
+        offer.rideId != currentRideId) {
+      debugPrint(
+        'PASSENGER SELECT OFFER RIDE ID MISMATCH '
+        'rideId=$currentRideId '
+        'offerRideId=${offer.rideId}',
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Esta propuesta no corresponde '
+            'al viaje actual.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    final expiresAt = offer.expiresAt;
+
+    if (expiresAt != null &&
+        !expiresAt.isAfter(DateTime.now())) {
+      setState(() {
+        _offers = visibleRideOffers(_offers);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Esta propuesta ya no está disponible.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    final selectionGeneration = ++_stateGeneration;
+    var refreshAfterFailure = false;
+
     setState(() {
       _selectingOfferId = offer.offerId;
     });
@@ -230,12 +318,27 @@ class _RideSearchingScreenState
       final ride = await ref
           .read(rideRepositoryProvider)
           .selectRideOffer(
-            rideId: widget.rideId,
+            rideId: currentRideId,
             offerId: offer.offerId,
           );
 
-      if (!mounted || _navigatingAway) {
+      if (!_canApplyGeneration(selectionGeneration)) {
         return;
+      }
+
+      final agreedFare = ride.agreedFare;
+
+      if (agreedFare != null &&
+          fareAmountsDiffer(
+                agreedFare,
+                offer.proposedFare,
+              ) ==
+              true) {
+        debugPrint(
+          'PASSENGER SELECT OFFER FARE MISMATCH '
+          'offerFare=${offer.proposedFare} '
+          'agreedFare=$agreedFare',
+        );
       }
 
       setState(() {
@@ -243,6 +346,10 @@ class _RideSearchingScreenState
         _offers = const [];
         _error = null;
       });
+
+      if (!mounted) {
+        return;
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -253,13 +360,15 @@ class _RideSearchingScreenState
         ),
       );
     } on DioException catch (error) {
+      refreshAfterFailure = true;
+
       debugPrint(
         'PASSENGER SELECT OFFER ERROR '
         'status=${error.response?.statusCode} '
         'data=${error.response?.data}',
       );
 
-      if (!mounted) {
+      if (!_canApplyGeneration(selectionGeneration)) {
         return;
       }
 
@@ -277,19 +386,26 @@ class _RideSearchingScreenState
             'No se pudo conectar con TukiTuki.';
       }
 
+      if (!mounted) {
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
         ),
       );
-
-      await _loadRide();
     } finally {
-      if (mounted && !_navigatingAway) {
+      if (_canApplyGeneration(selectionGeneration)) {
         setState(() {
           _selectingOfferId = null;
         });
       }
+    }
+
+    if (refreshAfterFailure &&
+        _canApplyGeneration(selectionGeneration)) {
+      await _loadRide();
     }
   }
 
@@ -721,7 +837,7 @@ class _RideSearchingScreenState
                             const SizedBox(height: 18),
 
                             Text(
-                              offer.isCounterOffer
+                              offer.hasDifferentProposedFare
                                   ? 'Contraoferta del conductor'
                                   : 'Acepta tu precio',
                               textAlign:
@@ -742,7 +858,7 @@ class _RideSearchingScreenState
                               ),
                             ),
 
-                            if (offer.isCounterOffer) ...[
+                            if (offer.hasDifferentProposedFare) ...[
                               const SizedBox(
                                 height: 4,
                               ),

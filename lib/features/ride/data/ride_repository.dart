@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
@@ -101,14 +102,36 @@ class RideRepository {
 
     for (final item in data) {
       if (item is! Map) {
+        if (kDebugMode) {
+          debugPrint(
+            'Ignorando propuesta inválida: '
+            'el elemento no es un objeto JSON.',
+          );
+        }
+
         continue;
       }
 
-      offers.add(
-        PassengerRideOffer.fromJson(
+      try {
+        final offer = PassengerRideOffer.fromJson(
           Map<String, dynamic>.from(item),
-        ),
-      );
+        );
+
+        if (offer.offerId.trim().isEmpty ||
+            offer.rideId.trim().isEmpty) {
+          throw const FormatException(
+            'La propuesta no tiene offerId o rideId.',
+          );
+        }
+
+        offers.add(offer);
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint(
+            'Ignorando propuesta inválida: $error',
+          );
+        }
+      }
     }
 
     return offers;

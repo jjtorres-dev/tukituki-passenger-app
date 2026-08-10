@@ -1,3 +1,5 @@
+import 'fare_amount.dart';
+
 class PassengerRideOffer {
   const PassengerRideOffer({
     required this.offerId,
@@ -37,6 +39,14 @@ class PassengerRideOffer {
 
   final DateTime? proposedAt;
   final DateTime? expiresAt;
+
+  bool get hasDifferentProposedFare {
+    return fareAmountsDiffer(
+          passengerOfferFare,
+          proposedFare,
+        ) ??
+        isCounterOffer;
+  }
 
   String get driverDisplayName {
     final initial = driverLastNameInitial.trim();
@@ -89,9 +99,8 @@ class PassengerRideOffer {
       return num.tryParse(value?.toString() ?? '') ?? 0;
     }
 
-    final passengerValue = double.tryParse(passengerFare);
-
-    final proposedValue = double.tryParse(proposedFare);
+    final explicitIsCounterOffer =
+        json['isCounterOffer'];
 
     return PassengerRideOffer(
       offerId: json['offerId']?.toString() ?? json['id']?.toString() ?? '',
@@ -128,10 +137,13 @@ class PassengerRideOffer {
       passengerOfferFare: passengerFare,
       proposedFare: proposedFare,
       isCounterOffer:
-          json['isCounterOffer'] as bool? ??
-          (passengerValue != null &&
-              proposedValue != null &&
-              proposedValue > passengerValue),
+          explicitIsCounterOffer is bool
+              ? explicitIsCounterOffer
+              : fareAmountsDiffer(
+                    passengerFare,
+                    proposedFare,
+                  ) ??
+                  false,
       currency: json['currency']?.toString() ?? 'PEN',
       proposedAt: DateTime.tryParse(json['proposedAt']?.toString() ?? ''),
       expiresAt: DateTime.tryParse(json['expiresAt']?.toString() ?? ''),

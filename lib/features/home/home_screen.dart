@@ -16,6 +16,7 @@ import '../fare/domain/fare_estimate.dart';
 import '../places/data/places_repository.dart';
 import '../places/domain/place_prediction.dart';
 import '../ride/data/ride_repository.dart';
+import '../ride/domain/fare_amount.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({
@@ -1029,6 +1030,10 @@ class _HomeScreenState
   }
 
   Future<void> _requestRide() async {
+    if (_requestingRide) {
+      return;
+    }
+
     final quote = _quote;
 
     if (quote == null) {
@@ -1044,6 +1049,7 @@ class _HomeScreenState
         double.tryParse(rawOffer);
 
     if (passengerOffer == null ||
+        !passengerOffer.isFinite ||
         passengerOffer <= 0 ||
         passengerOffer > 9999.99) {
       ScaffoldMessenger.of(context)
@@ -1077,7 +1083,20 @@ class _HomeScreenState
     }
 
     final normalizedPassengerOffer =
-        passengerOffer.toStringAsFixed(2);
+        normalizePassengerOfferFare(rawOffer);
+
+    if (normalizedPassengerOffer == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Ingresa un monto válido para tu oferta.',
+          ),
+        ),
+      );
+
+      return;
+    }
 
     setState(() {
       _requestingRide = true;
