@@ -30,6 +30,18 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState
     extends ConsumerState<HomeScreen> {
+  static const Color _darkGreen = Color(0xFF123B26);
+  static const Color _green = Color(0xFF1F7A3E);
+  static const Color _secondaryGreen = Color(0xFF5C8A17);
+  static const Color _ctaYellow = Color(0xFFFFC72C);
+  static const Color _cream = Color(0xFFFFF9EC);
+  static const Color _secondaryCream = Color(0xFFFBF7EA);
+  static const Color _border = Color(0xFFE7E0CB);
+  static const Color _softBorder = Color(0xFFEFE8D4);
+  static const Color _primaryText = Color(0xFF16241C);
+  static const Color _secondaryText = Color(0xFF7C8A79);
+  static const Color _destinationColor = Color(0xFFD8542C);
+
   static const LatLng _tarapotoCenter = LatLng(
     -6.4877,
     -76.3599,
@@ -49,6 +61,7 @@ class _HomeScreenState
       FocusNode();
 
   Timer? _searchDebounce;
+  Timer? _quoteExpiryTimer;
 
   Position? _currentPosition;
   LatLng? _selectedDestination;
@@ -86,12 +99,49 @@ class _HomeScreenState
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _quoteExpiryTimer?.cancel();
     _destinationSearchController.dispose();
     _passengerOfferController.dispose();
     _destinationSearchFocusNode.dispose();
     _mapController?.dispose();
 
     super.dispose();
+  }
+
+  void _cancelQuoteExpiryTimer() {
+    _quoteExpiryTimer?.cancel();
+    _quoteExpiryTimer = null;
+  }
+
+  void _scheduleQuoteExpiryTimer(
+    FareEstimate quote,
+  ) {
+    _cancelQuoteExpiryTimer();
+
+    final duration = quote.expiresAt.difference(
+      DateTime.now(),
+    );
+
+    if (duration <= Duration.zero) {
+      if (mounted) {
+        setState(() {});
+      }
+
+      return;
+    }
+
+    _quoteExpiryTimer = Timer(
+      duration,
+      () {
+        _quoteExpiryTimer = null;
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {});
+      },
+    );
   }
 
   String _createPlacesSessionToken() {
@@ -205,6 +255,8 @@ class _HomeScreenState
       if (!mounted) {
         return;
       }
+
+      _cancelQuoteExpiryTimer();
 
       setState(() {
         _currentPosition = position;
@@ -413,6 +465,7 @@ class _HomeScreenState
     LatLng destination,
   ) {
     _searchDebounce?.cancel();
+    _cancelQuoteExpiryTimer();
 
     _destinationSearchFocusNode.unfocus();
     _destinationSearchController.clear();
@@ -437,6 +490,7 @@ class _HomeScreenState
 
   void _clearDestination() {
     _searchDebounce?.cancel();
+    _cancelQuoteExpiryTimer();
 
     _destinationSearchController.clear();
 
@@ -462,6 +516,8 @@ class _HomeScreenState
     final query = value.trim();
 
     if (_selectedDestination != null) {
+      _cancelQuoteExpiryTimer();
+
       setState(() {
         _selectedDestination = null;
         _selectedDestinationAddress = null;
@@ -630,6 +686,8 @@ class _HomeScreenState
       _destinationSearchController.text =
           prediction.primaryText;
 
+      _cancelQuoteExpiryTimer();
+
       setState(() {
         _selectedDestination =
             destination;
@@ -750,9 +808,7 @@ class _HomeScreenState
             6,
 
         color:
-            Theme.of(context)
-                .colorScheme
-                .primary,
+            _secondaryGreen,
 
         geodesic:
             false,
@@ -915,6 +971,8 @@ class _HomeScreenState
       return;
     }
 
+    _cancelQuoteExpiryTimer();
+
     setState(() {
       _loading = true;
       _quote = null;
@@ -963,6 +1021,8 @@ class _HomeScreenState
         _quote = quote;
         _routePoints = routePoints;
       });
+
+      _scheduleQuoteExpiryTimer(quote);
 
       if (routePoints.length >= 2) {
         await _fitCameraToRoute();
@@ -1037,6 +1097,20 @@ class _HomeScreenState
     final quote = _quote;
 
     if (quote == null) {
+      return;
+    }
+
+    if (_isQuoteExpired(quote)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'La cotización venció. '
+            'Calcula una nueva tarifa.',
+          ),
+        ),
+      );
+
       return;
     }
 
@@ -1176,6 +1250,70 @@ class _HomeScreenState
     context.go('/login');
   }
 
+  bool _isQuoteExpired(
+    FareEstimate quote,
+  ) {
+    return !quote.expiresAt.isAfter(
+      DateTime.now(),
+    );
+  }
+
+  String _formatQuoteExpiry(
+    DateTime expiresAt,
+  ) {
+    return MaterialLocalizations.of(context)
+        .formatTimeOfDay(
+      TimeOfDay.fromDateTime(
+        expiresAt.toLocal(),
+      ),
+      alwaysUse24HourFormat:
+          MediaQuery.alwaysUse24HourFormatOf(
+        context,
+      ),
+    );
+  }
+
+  Widget _buildMetricChip({
+    required IconData icon,
+    required String label,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 8,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(
+          alpha: 0.12,
+        ),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: Colors.white.withValues(
+            alpha: 0.16,
+          ),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 17,
+            color: _ctaYellow,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final quote = _quote;
@@ -1187,34 +1325,142 @@ class _HomeScreenState
         position != null &&
         destination != null &&
         !_loading &&
+        !_requestingRide &&
         !_loadingPlaceDetails;
 
+    final quoteExpired =
+        quote != null && _isQuoteExpired(quote);
+
+    final hasValidOffer =
+        normalizePassengerOfferFare(
+          _passengerOfferController.text,
+        ) !=
+        null;
+
+    final canRequestRide =
+        destination != null &&
+        quote != null &&
+        !quoteExpired &&
+        hasValidOffer &&
+        !_loading &&
+        !_requestingRide;
+
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset =
+        mediaQuery.viewInsets.bottom;
+    final keyboardVisible =
+        keyboardInset > 0;
+    late final String ctaLabel;
+    late final VoidCallback? ctaOnPressed;
+    late final IconData ctaIcon;
+
+    if (_loading) {
+      ctaLabel = 'Calculando tarifa...';
+      ctaOnPressed = null;
+      ctaIcon = Icons.route;
+    } else if (_requestingRide) {
+      ctaLabel = 'Buscando conductor...';
+      ctaOnPressed = null;
+      ctaIcon = Icons.two_wheeler;
+    } else if (destination == null) {
+      ctaLabel = 'Selecciona un destino';
+      ctaOnPressed = null;
+      ctaIcon = Icons.location_on_outlined;
+    } else if (quote == null) {
+      ctaLabel = 'Calcular tarifa';
+      ctaOnPressed =
+          canEstimate ? _estimateFare : null;
+      ctaIcon = Icons.route;
+    } else if (quoteExpired) {
+      ctaLabel = 'Calcular nueva tarifa';
+      ctaOnPressed =
+          canEstimate ? _estimateFare : null;
+      ctaIcon = Icons.refresh;
+    } else {
+      ctaLabel = 'Ofrecer y buscar conductor';
+      ctaOnPressed =
+          canRequestRide ? _requestRide : null;
+      ctaIcon = Icons.two_wheeler;
+    }
+
+    final ctaShowsProgress =
+        _loading || _requestingRide;
+    final mapHeight = keyboardVisible
+        ? 150.0
+        : (mediaQuery.size.height * 0.33)
+            .clamp(200.0, 280.0)
+            .toDouble();
+
     return Scaffold(
+      backgroundColor: _cream,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        title: const Text(
-          'TukiTuki',
+        toolbarHeight: 58,
+        backgroundColor: _cream,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleSpacing: 18,
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: _green,
+                borderRadius:
+                    BorderRadius.circular(11),
+              ),
+              child: const Icon(
+                Icons.two_wheeler,
+                color: Colors.white,
+                size: 21,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'TukiTuki',
+              style: TextStyle(
+                color: _darkGreen,
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
-            tooltip:
-                'Cerrar sesión',
-            onPressed:
-                _logout,
-            icon:
-                const Icon(
+            tooltip: 'Cerrar sesión',
+            onPressed: _logout,
+            color: _darkGreen,
+            icon: const Icon(
               Icons.logout,
             ),
           ),
+          const SizedBox(width: 8),
         ],
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(
+            height: 1,
+            thickness: 1,
+            color: _softBorder,
+          ),
+        ),
       ),
       body: SafeArea(
+        top: false,
+        bottom: false,
         child: SingleChildScrollView(
+          keyboardDismissBehavior:
+              ScrollViewKeyboardDismissBehavior.onDrag,
           child: Column(
             crossAxisAlignment:
                 CrossAxisAlignment.stretch,
             children: [
               SizedBox(
-                height: 390,
+                height: mapHeight,
                 child: Stack(
                   children: [
                     GoogleMap(
@@ -1292,42 +1538,41 @@ class _HomeScreenState
 
                     if (destination == null)
                       Positioned(
-                        left:
-                            16,
-                        right:
-                            72,
-                        top:
-                            16,
+                        left: 14,
+                        right: 74,
+                        top: 14,
                         child: Card(
+                          margin: EdgeInsets.zero,
+                          elevation: 2,
+                          color: _cream,
+                          surfaceTintColor:
+                              Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(14),
+                          ),
                           child: Padding(
-                            padding:
-                                const EdgeInsets
-                                    .symmetric(
-                              horizontal:
-                                  14,
-                              vertical:
-                                  10,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 9,
                             ),
                             child: Row(
                               children: [
                                 const Icon(
                                   Icons.touch_app,
-                                  size:
-                                      20,
+                                  size: 18,
+                                  color: _darkGreen,
                                 ),
-                                const SizedBox(
-                                  width:
-                                      10,
-                                ),
-                                Expanded(
+                                const SizedBox(width: 8),
+                                const Expanded(
                                   child: Text(
-                                    'También puedes tocar un punto del mapa para elegir tu destino',
-                                    style:
-                                        Theme.of(
-                                      context,
-                                    )
-                                            .textTheme
-                                            .bodyMedium,
+                                    'Toca el mapa para elegir tu destino',
+                                    style: TextStyle(
+                                      color: _primaryText,
+                                      fontSize: 12.5,
+                                      fontWeight:
+                                          FontWeight.w600,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1337,16 +1582,21 @@ class _HomeScreenState
                       ),
 
                     Positioned(
-                      right:
-                          16,
-                      bottom:
-                          16,
+                      right: 16,
+                      bottom: 30,
                       child:
                           FloatingActionButton
                               .small(
                         heroTag:
                             'passenger-location',
 
+                        tooltip:
+                            'Centrar en mi ubicación',
+                        backgroundColor:
+                            _ctaYellow,
+                        foregroundColor:
+                            _darkGreen,
+                        disabledElevation: 0,
                         onPressed:
                             _locating
                                 ? null
@@ -1362,6 +1612,8 @@ class _HomeScreenState
                                     CircularProgressIndicator(
                                   strokeWidth:
                                       2,
+                                  color:
+                                      _darkGreen,
                                 ),
                               )
                             : const Icon(
@@ -1373,52 +1625,91 @@ class _HomeScreenState
                 ),
               ),
 
-              Padding(
+              Container(
+                transform:
+                    Matrix4.translationValues(
+                  0,
+                  -24,
+                  0,
+                ),
                 padding:
-                    const EdgeInsets.all(
-                  24,
+                    const EdgeInsets.fromLTRB(
+                  20,
+                  12,
+                  20,
+                  4,
+                ),
+                decoration: const BoxDecoration(
+                  color: _cream,
+                  borderRadius:
+                      BorderRadius.vertical(
+                    top: Radius.circular(26),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment:
                       CrossAxisAlignment.stretch,
                   children: [
+                    Center(
+                      child: Container(
+                        width: 42,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _border,
+                          borderRadius:
+                              BorderRadius.circular(20),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
                     const Text(
                       '¿A dónde vamos?',
                       style:
                           TextStyle(
-                        fontSize:
-                            30,
-                        fontWeight:
-                            FontWeight.bold,
+                        color: _darkGreen,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.7,
                       ),
                     ),
 
-                    const SizedBox(
-                      height:
-                          8,
-                    ),
+                    const SizedBox(height: 10),
 
                     if (_locationMessage !=
                         null)
-                      Card(
-                        child: Padding(
-                          padding:
-                              const EdgeInsets
-                                  .all(
-                            16,
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(
+                            0xFFFFF0E8,
                           ),
+                          borderRadius:
+                              BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _destinationColor
+                                .withValues(
+                              alpha: 0.22,
+                            ),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
                           child: Row(
                             children: [
                               const Icon(
                                 Icons.location_off,
+                                color: _destinationColor,
                               ),
-                              const SizedBox(
-                                width:
-                                    12,
-                              ),
+                              const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
                                   _locationMessage!,
+                                  style: const TextStyle(
+                                    color: _primaryText,
+                                    fontWeight:
+                                        FontWeight.w600,
+                                  ),
                                 ),
                               ),
                             ],
@@ -1427,26 +1718,46 @@ class _HomeScreenState
                       )
                     else if (position !=
                         null)
-                      Text(
-                        'GPS: '
-                        '${position.latitude.toStringAsFixed(5)}, '
-                        '${position.longitude.toStringAsFixed(5)}',
-                        style:
-                            Theme.of(
-                          context,
-                        )
-                                .textTheme
-                                .bodySmall,
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 18,
+                            color: _green,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Ubicación actual detectada',
+                            style: TextStyle(
+                              color: _secondaryText,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       )
                     else
-                      const Text(
-                        'Obteniendo tu ubicación...',
+                      const Row(
+                        children: [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child:
+                                CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: _green,
+                            ),
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            'Obteniendo tu ubicación...',
+                            style: TextStyle(
+                              color: _secondaryText,
+                            ),
+                          ),
+                        ],
                       ),
 
-                    const SizedBox(
-                      height:
-                          20,
-                    ),
+                    const SizedBox(height: 16),
 
                     TextField(
                       controller:
@@ -1470,15 +1781,20 @@ class _HomeScreenState
 
                       decoration:
                           InputDecoration(
-                        labelText:
+                        hintText:
                             'Buscar destino',
 
-                        hintText:
-                            'Ej. GH Bus, Plaza de Morales...',
+                        hintStyle:
+                            const TextStyle(
+                          color: _secondaryText,
+                          fontWeight:
+                              FontWeight.w500,
+                        ),
 
                         prefixIcon:
                             const Icon(
                           Icons.search,
+                          color: _darkGreen,
                         ),
 
                         suffixIcon:
@@ -1509,8 +1825,49 @@ class _HomeScreenState
                                       )
                                     : null,
 
-                        border:
-                            const OutlineInputBorder(),
+                        filled: true,
+                        fillColor: _secondaryCream,
+                        contentPadding:
+                            const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(15),
+                          borderSide:
+                              const BorderSide(
+                            color: _border,
+                          ),
+                        ),
+                        enabledBorder:
+                            OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(15),
+                          borderSide:
+                              const BorderSide(
+                            color: _border,
+                          ),
+                        ),
+                        focusedBorder:
+                            OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(15),
+                          borderSide:
+                              const BorderSide(
+                            color: _green,
+                            width: 1.5,
+                          ),
+                        ),
+                        disabledBorder:
+                            OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(15),
+                          borderSide:
+                              const BorderSide(
+                            color: _softBorder,
+                          ),
+                        ),
                       ),
                     ),
 
@@ -1519,7 +1876,10 @@ class _HomeScreenState
                         height:
                             12,
                       ),
-                      const LinearProgressIndicator(),
+                      const LinearProgressIndicator(
+                        color: _green,
+                        backgroundColor: _softBorder,
+                      ),
                     ],
 
                     if (_placeSearchMessage !=
@@ -1530,12 +1890,9 @@ class _HomeScreenState
                       ),
                       Text(
                         _placeSearchMessage!,
-                        style:
-                            Theme.of(
-                          context,
-                        )
-                                .textTheme
-                                .bodyMedium,
+                        style: const TextStyle(
+                          color: _secondaryText,
+                        ),
                       ),
                     ],
 
@@ -1547,6 +1904,17 @@ class _HomeScreenState
                       ),
 
                       Card(
+                        margin: EdgeInsets.zero,
+                        color: _secondaryCream,
+                        surfaceTintColor:
+                            Colors.transparent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(14),
+                          side: const BorderSide(
+                            color: _border,
+                          ),
+                        ),
                         clipBehavior:
                             Clip.antiAlias,
                         child: Column(
@@ -1562,6 +1930,8 @@ class _HomeScreenState
                                 leading:
                                     const Icon(
                                   Icons.location_on,
+                                  color:
+                                      _destinationColor,
                                 ),
 
                                 title:
@@ -1613,6 +1983,8 @@ class _HomeScreenState
                                 const Divider(
                                   height:
                                       1,
+                                  color:
+                                      _softBorder,
                                 ),
                             ],
                           ],
@@ -1625,143 +1997,169 @@ class _HomeScreenState
                           20,
                     ),
 
-                    Card(
-                      child: Padding(
-                        padding:
-                            const EdgeInsets
-                                .all(
-                          18,
-                        ),
-                        child: Column(
-                          children: [
-                            ListTile(
-                              contentPadding:
-                                  EdgeInsets.zero,
-
-                              leading:
-                                  const Icon(
-                                Icons.my_location,
-                              ),
-
-                              title:
-                                  const Text(
-                                'Origen',
-                              ),
-
-                              subtitle:
-                                  Text(
-                                position == null
-                                    ? 'Esperando GPS...'
-                                    : 'Tu ubicación actual',
-                              ),
-                            ),
-
-                            const Divider(),
-
-                            ListTile(
-                              contentPadding:
-                                  EdgeInsets.zero,
-
-                              leading:
-                                  const Icon(
-                                Icons.location_on,
-                              ),
-
-                              title:
-                                  const Text(
-                                'Destino',
-                              ),
-
-                              subtitle:
-                                  destination == null
-                                      ? const Text(
-                                          'Busca una dirección o toca el mapa',
-                                        )
-                                      : Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            if (_selectedDestinationName !=
-                                                null)
-                                              Text(
-                                                _selectedDestinationName!,
-                                                style:
-                                                    const TextStyle(
-                                                  fontWeight:
-                                                      FontWeight.w600,
-                                                ),
-                                              ),
-
-                                            if (_selectedDestinationAddress !=
-                                                null)
-                                              Text(
-                                                _selectedDestinationAddress!,
-                                              ),
-                                          ],
-                                        ),
-
-                              trailing:
-                                  destination ==
-                                          null
-                                      ? null
-                                      : IconButton(
-                                          tooltip:
-                                              'Quitar destino',
-                                          onPressed:
-                                              _clearDestination,
-                                          icon:
-                                              const Icon(
-                                            Icons.close,
-                                          ),
-                                        ),
-                            ),
-                          ],
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _secondaryCream,
+                        borderRadius:
+                            BorderRadius.circular(17),
+                        border: Border.all(
+                          color: _border,
                         ),
                       ),
-                    ),
-
-                    const SizedBox(
-                      height:
-                          24,
-                    ),
-
-                    FilledButton.icon(
-                      onPressed:
-                          canEstimate
-                              ? _estimateFare
-                              : null,
-
-                      icon: _loading
-                          ? const SizedBox(
-                              width:
-                                  20,
-                              height:
-                                  20,
-                              child:
-                                  CircularProgressIndicator(
-                                strokeWidth:
-                                    2,
+                      child: Column(
+                        children: [
+                          Row(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 20,
+                                height: 20,
+                                decoration:
+                                    const BoxDecoration(
+                                  color: _green,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.my_location,
+                                  color: Colors.white,
+                                  size: 12,
+                                ),
                               ),
-                            )
-                          : const Icon(
-                              Icons.route,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Origen',
+                                      style: TextStyle(
+                                        color:
+                                            _secondaryText,
+                                        fontSize: 12,
+                                        fontWeight:
+                                            FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      quote != null &&
+                                              quote.originAddress
+                                                  .trim()
+                                                  .isNotEmpty
+                                          ? quote.originAddress
+                                          : position == null
+                                              ? 'Esperando GPS...'
+                                              : 'Tu ubicación actual',
+                                      style: const TextStyle(
+                                        color: _primaryText,
+                                        fontWeight:
+                                            FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          Padding(
+                            padding:
+                                const EdgeInsets.only(
+                              left: 9,
                             ),
-
-                      label: Padding(
-                        padding:
-                            const EdgeInsets
-                                .symmetric(
-                          vertical:
-                              16,
-                        ),
-                        child: Text(
-                          _loading
-                              ? 'Calculando ruta...'
-                              : destination ==
-                                      null
-                                  ? 'Selecciona un destino'
-                                  : 'Calcular tarifa',
-                        ),
+                            child: Align(
+                              alignment:
+                                  Alignment.centerLeft,
+                              child: Column(
+                                children: List.generate(
+                                  3,
+                                  (_) => Container(
+                                    width: 2,
+                                    height: 4,
+                                    margin:
+                                        const EdgeInsets.symmetric(
+                                      vertical: 2,
+                                    ),
+                                    color: _border,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Row(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.location_on,
+                                color: _destinationColor,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Destino',
+                                      style: TextStyle(
+                                        color:
+                                            _secondaryText,
+                                        fontSize: 12,
+                                        fontWeight:
+                                            FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      destination == null
+                                          ? 'Selecciona un destino'
+                                          : _selectedDestinationName ??
+                                              'Destino seleccionado',
+                                      style: const TextStyle(
+                                        color: _primaryText,
+                                        fontWeight:
+                                            FontWeight.w700,
+                                      ),
+                                    ),
+                                    if (destination != null &&
+                                        _selectedDestinationAddress !=
+                                            null &&
+                                        _selectedDestinationAddress!
+                                            .trim()
+                                            .isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _selectedDestinationAddress!,
+                                        style: const TextStyle(
+                                          color:
+                                              _secondaryText,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              if (destination != null)
+                                IconButton(
+                                  tooltip: 'Quitar destino',
+                                  onPressed:
+                                      _clearDestination,
+                                  visualDensity:
+                                      VisualDensity.compact,
+                                  icon: const Icon(
+                                    Icons.close,
+                                    color: _secondaryText,
+                                    size: 20,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
 
@@ -1771,7 +2169,21 @@ class _HomeScreenState
                             28,
                       ),
 
-                      Card(
+                      Container(
+                        decoration: BoxDecoration(
+                          color: _darkGreen,
+                          borderRadius:
+                              BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _darkGreen.withValues(
+                                alpha: 0.16,
+                              ),
+                              blurRadius: 18,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
                         child: Padding(
                           padding:
                               const EdgeInsets
@@ -1783,25 +2195,17 @@ class _HomeScreenState
                                 CrossAxisAlignment.stretch,
                             children: [
                               const Text(
-                                'Tu viaje',
-                                style:
-                                    TextStyle(
-                                  fontSize:
-                                      20,
-                                  fontWeight:
-                                      FontWeight.bold,
-                                ),
-                              ),
-
-                              const SizedBox(
-                                height:
-                                    20,
-                              ),
-
-                              const Text(
                                 'Precio recomendado TukiTuki',
                                 textAlign:
                                     TextAlign.center,
+                                style: TextStyle(
+                                  color: Color(
+                                    0xFFDCE7DE,
+                                  ),
+                                  fontSize: 13,
+                                  fontWeight:
+                                      FontWeight.w600,
+                                ),
                               ),
 
                               const SizedBox(
@@ -1815,10 +2219,11 @@ class _HomeScreenState
                                     TextAlign.center,
                                 style:
                                     const TextStyle(
-                                  fontSize:
-                                      32,
+                                  color: Colors.white,
+                                  fontSize: 38,
                                   fontWeight:
-                                      FontWeight.bold,
+                                      FontWeight.w800,
+                                  letterSpacing: -1,
                                 ),
                               ),
 
@@ -1831,10 +2236,10 @@ class _HomeScreenState
                                 '¿Cuánto quieres ofrecer?',
                                 style:
                                     TextStyle(
-                                  fontSize:
-                                      17,
+                                  color: Colors.white,
+                                  fontSize: 16,
                                   fontWeight:
-                                      FontWeight.w600,
+                                      FontWeight.w700,
                                 ),
                               ),
 
@@ -1850,6 +2255,10 @@ class _HomeScreenState
                                 enabled:
                                     !_requestingRide,
 
+                                onChanged: (_) {
+                                  setState(() {});
+                                },
+
                                 keyboardType:
                                     const TextInputType
                                         .numberWithOptions(
@@ -1862,22 +2271,78 @@ class _HomeScreenState
 
                                 style:
                                     const TextStyle(
-                                  fontSize:
-                                      28,
+                                  color: _primaryText,
+                                  fontSize: 27,
                                   fontWeight:
-                                      FontWeight.bold,
+                                      FontWeight.w800,
                                 ),
 
                                 decoration:
-                                    const InputDecoration(
+                                    InputDecoration(
                                   prefixText:
                                       'S/ ',
+                                  prefixStyle:
+                                      const TextStyle(
+                                    color: _secondaryText,
+                                    fontSize: 19,
+                                    fontWeight:
+                                        FontWeight.w700,
+                                  ),
                                   hintText:
                                       '5.00',
-                                  border:
-                                      OutlineInputBorder(),
+                                  filled: true,
+                                  fillColor: _cream,
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 13,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                      14,
+                                    ),
+                                    borderSide:
+                                        BorderSide.none,
+                                  ),
+                                  enabledBorder:
+                                      OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                      14,
+                                    ),
+                                    borderSide:
+                                        BorderSide.none,
+                                  ),
+                                  focusedBorder:
+                                      OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                      14,
+                                    ),
+                                    borderSide:
+                                        const BorderSide(
+                                      color: _ctaYellow,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  disabledBorder:
+                                      OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                      14,
+                                    ),
+                                    borderSide:
+                                        BorderSide.none,
+                                  ),
                                   helperText:
                                       'Este es el monto que verán los conductores.',
+                                  helperStyle:
+                                      const TextStyle(
+                                    color: Color(
+                                      0xFFB9C8BC,
+                                    ),
+                                  ),
                                 ),
                               ),
 
@@ -1886,71 +2351,23 @@ class _HomeScreenState
                                     8,
                               ),
 
-                              Text(
-                                '${(quote.distanceMeters / 1000).toStringAsFixed(1)} km'
-                                ' • '
-                                '${(quote.durationSeconds / 60).round()} min',
-                                textAlign:
-                                    TextAlign.center,
-                              ),
-
-                              const SizedBox(
-                                height:
-                                    20,
-                              ),
-
-                              Row(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                              Wrap(
+                                alignment:
+                                    WrapAlignment.center,
+                                spacing: 10,
+                                runSpacing: 8,
                                 children: [
-                                  const Icon(
-                                    Icons.my_location,
-                                    size:
-                                        20,
+                                  _buildMetricChip(
+                                    icon:
+                                        Icons.route_outlined,
+                                    label:
+                                        '${(quote.distanceMeters / 1000).toStringAsFixed(1)} km',
                                   ),
-                                  const SizedBox(
-                                    width:
-                                        10,
-                                  ),
-                                  Expanded(
-                                    child:
-                                        Text(
-                                      quote.originAddress,
-                                    ),
-                                  ),
-                                ],
-                              ),
-
-                              const Padding(
-                                padding:
-                                    EdgeInsets.symmetric(
-                                  vertical:
-                                      10,
-                                ),
-                                child:
-                                    Icon(
-                                  Icons.arrow_downward,
-                                ),
-                              ),
-
-                              Row(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  const Icon(
-                                    Icons.location_on,
-                                    size:
-                                        20,
-                                  ),
-                                  const SizedBox(
-                                    width:
-                                        10,
-                                  ),
-                                  Expanded(
-                                    child:
-                                        Text(
-                                      quote.destinationAddress,
-                                    ),
+                                  _buildMetricChip(
+                                    icon:
+                                        Icons.schedule,
+                                    label:
+                                        '${(quote.durationSeconds / 60).round()} min',
                                   ),
                                 ],
                               ),
@@ -1960,51 +2377,71 @@ class _HomeScreenState
                                     20,
                               ),
 
-                              Text(
-                                'Cotización válida hasta '
-                                '${quote.expiresAt.toLocal()}',
-                                textAlign:
-                                    TextAlign.center,
-                                style:
-                                    const TextStyle(
-                                  fontSize:
-                                      12,
-                                ),
-                              ),
-
-                              const SizedBox(
-                                height:
-                                    20,
-                              ),
-
-                              FilledButton.icon(
-                                onPressed:
-                                    _requestingRide
-                                        ? null
-                                        : _requestRide,
-
-                                icon:
-                                    _requestingRide
-                                        ? const SizedBox(
-                                            width:
-                                                20,
-                                            height:
-                                                20,
-                                            child:
-                                                CircularProgressIndicator(
-                                              strokeWidth:
-                                                  2,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.two_wheeler,
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    quoteExpired
+                                        ? Icons.timer_off_outlined
+                                        : Icons.schedule,
+                                    size: 16,
+                                    color: quoteExpired
+                                        ? _ctaYellow
+                                        : const Color(
+                                            0xFFB9C8BC,
                                           ),
+                                  ),
+                                  const SizedBox(width: 7),
+                                  Flexible(
+                                    child: Text(
+                                      quoteExpired
+                                          ? 'Cotización vencida'
+                                          : 'Cotización válida hasta '
+                                              '${_formatQuoteExpiry(quote.expiresAt)}',
+                                      textAlign:
+                                          TextAlign.center,
+                                      style: TextStyle(
+                                        color: quoteExpired
+                                            ? _ctaYellow
+                                            : const Color(
+                                                0xFFB9C8BC,
+                                              ),
+                                        fontSize: 12.5,
+                                        fontWeight:
+                                            FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
 
-                                label:
-                                    Text(
-                                  _requestingRide
-                                      ? 'Solicitando...'
-                                      : 'Ofrecer y buscar conductor',
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment:
+                                    Alignment.center,
+                                child: TextButton.icon(
+                                  onPressed: canEstimate
+                                      ? _estimateFare
+                                      : null,
+                                  style:
+                                      TextButton.styleFrom(
+                                    foregroundColor:
+                                        const Color(
+                                      0xFFDCE7DE,
+                                    ),
+                                    disabledForegroundColor:
+                                        _secondaryText,
+                                    visualDensity:
+                                        VisualDensity.compact,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.refresh,
+                                    size: 18,
+                                  ),
+                                  label: const Text(
+                                    'Recalcular tarifa',
+                                  ),
                                 ),
                               ),
                             ],
@@ -2021,6 +2458,70 @@ class _HomeScreenState
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: Padding(
+        padding: EdgeInsets.only(
+          bottom: keyboardInset,
+        ),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: _cream,
+            border: Border(
+              top: BorderSide(
+                color: _softBorder,
+              ),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            bottom: !keyboardVisible,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                16,
+                10,
+                16,
+                12,
+              ),
+              child: SizedBox(
+                height: 54,
+                child: FilledButton.icon(
+                  onPressed: ctaOnPressed,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _ctaYellow,
+                    foregroundColor: _darkGreen,
+                    disabledBackgroundColor:
+                        _softBorder,
+                    disabledForegroundColor:
+                        _secondaryText,
+                    shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(17),
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight:
+                          FontWeight.w800,
+                    ),
+                  ),
+                  icon: ctaShowsProgress
+                      ? const SizedBox(
+                          width: 19,
+                          height: 19,
+                          child:
+                              CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _darkGreen,
+                          ),
+                        )
+                      : Icon(
+                          ctaIcon,
+                        ),
+                  label: Text(ctaLabel),
+                ),
+              ),
+            ),
           ),
         ),
       ),
