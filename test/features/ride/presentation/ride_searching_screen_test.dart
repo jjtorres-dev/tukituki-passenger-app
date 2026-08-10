@@ -11,6 +11,250 @@ import 'package:passenger/features/ride/domain/passenger_ride_offer.dart';
 import 'package:passenger/features/ride/presentation/ride_searching_screen.dart';
 
 void main() {
+  testWidgets('SEARCHING_DRIVER muestra viaje real, métricas y estado vacío', (
+    tester,
+  ) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(
+        passengerOfferFare: '5.70',
+        originAddress: 'Jr. Los Andes 120',
+        destinationAddress: 'Plaza de Armas',
+        distanceMeters: 2100,
+        estimatedDurationSeconds: 360,
+      ),
+      onGetRideOffers: (_) async => const [],
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(find.text('Buscando un conductor...'), findsOneWidget);
+    expect(find.text('TukiTuki'), findsOneWidget);
+    expect(find.text('Tu TukiTuki'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('cancel-search-close-button')),
+      findsOneWidget,
+    );
+    expect(find.text('TU OFERTA'), findsOneWidget);
+    expect(find.text('S/ 5.70'), findsOneWidget);
+    expect(find.text('Jr. Los Andes 120'), findsOneWidget);
+    expect(find.text('Plaza de Armas'), findsOneWidget);
+    expect(find.text('2.1 km'), findsOneWidget);
+    expect(find.text('6 min'), findsOneWidget);
+    expect(
+      find.text('Todavía no hay conductores interesados.'),
+      findsOneWidget,
+    );
+    expect(find.text('Seguimos buscando por ti.'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('offers-count')),
+        matching: find.text('0'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('métricas no válidas no reservan chips falsos', (tester) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async =>
+          _ride(distanceMeters: 0, estimatedDurationSeconds: -1),
+      onGetRideOffers: (_) async => const [],
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(find.byKey(const ValueKey('ride-distance-chip')), findsNothing);
+    expect(find.byKey(const ValueKey('ride-duration-chip')), findsNothing);
+    expect(find.text('0 m'), findsNothing);
+    expect(find.text('0 min'), findsNothing);
+  });
+
+  testWidgets('oferta muestra identidad, rating, distancia y precio reales', (
+    tester,
+  ) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(passengerOfferFare: '5.70'),
+      onGetRideOffers: (_) async => [
+        _offer(
+          offerId: 'offer-julio',
+          driverName: 'Julio',
+          driverLastNameInitial: 'R',
+          proposedFare: '6.00',
+          isCounterOffer: true,
+          ratingAverage: 4.9,
+          ratingCount: 21,
+          distanceToOriginMeters: 850,
+          passengerOfferFare: '5.70',
+        ),
+        _offer(
+          offerId: 'offer-new',
+          driverName: 'Conductor',
+          proposedFare: '5.70',
+          isCounterOffer: false,
+          ratingAverage: 0,
+          ratingCount: 0,
+          distanceToOriginMeters: 0,
+          passengerOfferFare: '5.70',
+        ),
+      ],
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(find.text('Julio R.'), findsOneWidget);
+    expect(find.text('JR'), findsOneWidget);
+    expect(find.text('4.9'), findsOneWidget);
+    expect(find.text('A 850 m de tu origen'), findsOneWidget);
+    expect(find.text('S/ 6.00'), findsOneWidget);
+    expect(find.text('0.0'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('offers-count')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('coordenadas válidas construyen el GoogleMap real', (
+    tester,
+  ) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(
+        originLatitude: -6.4877,
+        originLongitude: -76.3599,
+        destinationLatitude: -6.4812,
+        destinationLongitude: -76.3651,
+      ),
+      onGetRideOffers: (_) async => const [],
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(
+      find.byKey(const ValueKey('ride-search-google-map')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('ride-search-map-placeholder')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('sin coordenadas no construye mapa ni LatLng de fallback', (
+    tester,
+  ) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => const [],
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(find.byKey(const ValueKey('ride-search-google-map')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('ride-search-map-placeholder')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('una sola coordenada válida mantiene disponible el mapa', (
+    tester,
+  ) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async =>
+          _ride(originLatitude: -6.4877, originLongitude: -76.3599),
+      onGetRideOffers: (_) async => const [],
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(
+      find.byKey(const ValueKey('ride-search-google-map')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('ride-search-map-placeholder')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('viewport 360x640 soporta varias ofertas sin overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => [
+        for (var index = 0; index < 5; index++)
+          _offer(
+            offerId: 'offer-$index',
+            driverName: 'Conductor $index',
+            proposedFare: '${7 + index}.00',
+            isCounterOffer: index > 0,
+          ),
+      ],
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(tester.takeException(), isNull);
+    await tester.drag(
+      find.byKey(const ValueKey('ride-search-scroll')),
+      const Offset(0, -1800),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('cancel-search-button')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('X superior abre la misma confirmación de cancelación', (
+    tester,
+  ) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => const [],
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    await tester.tap(find.byKey(const ValueKey('cancel-search-close-button')));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('¿Cancelar la búsqueda?'), findsOneWidget);
+    expect(find.text('Tu solicitud de viaje será cancelada.'), findsOneWidget);
+    expect(repository.cancelRequests, 0);
+  });
+
+  testWidgets('COMPLETED conserva navegación al receipt', (tester) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(status: 'COMPLETED'),
+      onGetRideOffers: (_) async => const [],
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(
+      router.routeInformationProvider.value.uri.path,
+      '/ride/ride-real/receipt',
+    );
+    expect(find.text('RECEIPT_DESTINATION'), findsOneWidget);
+  });
+
   testWidgets('renderiza aceptación, lower bid y higher bid simultáneamente', (
     tester,
   ) async {
@@ -54,7 +298,7 @@ void main() {
     expect(find.text('Expirado'), findsNothing);
     expect(find.text('Acepta tu precio'), findsOneWidget);
     expect(find.text('Contraoferta del conductor'), findsNWidgets(2));
-    expect(find.text('Elegir conductor'), findsNWidgets(3));
+    expect(find.text('Aceptar'), findsNWidgets(3));
   });
 
   for (final statusCode in const [404, 409]) {
@@ -157,7 +401,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
       expect(repository.activeRideRequests, 2);
 
-      final selectButton = find.text('Elegir conductor');
+      final selectButton = find.text('Aceptar');
       await tester.ensureVisible(selectButton);
       await tester.tap(selectButton);
       await _flushAsync(tester);
@@ -193,7 +437,7 @@ void main() {
     await _pumpScreen(tester, repository);
     addTearDown(() => _disposeScreen(tester));
 
-    final selectButton = find.text('Elegir conductor');
+    final selectButton = find.text('Aceptar');
     await tester.ensureVisible(selectButton);
     await tester.tap(selectButton);
     await _flushAsync(tester);
@@ -333,6 +577,8 @@ void main() {
       ),
       findsWidgets,
     );
+    expect(find.byKey(const ValueKey('ride-search-error')), findsOneWidget);
+    expect(find.byKey(const ValueKey('offers-empty-state')), findsNothing);
 
     await tester.pump(const Duration(seconds: 3));
     await _flushAsync(tester);
@@ -352,6 +598,12 @@ void main() {
           proposedFare: '7.00',
           isCounterOffer: false,
         ),
+        _offer(
+          offerId: 'offer-b',
+          driverName: 'María',
+          proposedFare: '8.00',
+          isCounterOffer: true,
+        ),
       ],
       onSelectRideOffer: ({required rideId, required offerId}) =>
           pendingSelection.future,
@@ -360,13 +612,32 @@ void main() {
     await _pumpScreen(tester, repository);
     addTearDown(() => _disposeScreen(tester));
 
-    final selectButton = find.text('Elegir conductor');
-    await tester.ensureVisible(selectButton);
-    await tester.tap(selectButton);
+    final firstSelectButton = find.byKey(
+      const ValueKey('accept-offer-offer-a'),
+    );
+    await tester.ensureVisible(firstSelectButton);
+    await tester.tap(firstSelectButton);
     await _flushAsync(tester);
 
     final cancelButton = find.byKey(const ValueKey('cancel-search-button'));
     expect(tester.widget<OutlinedButton>(cancelButton).onPressed, isNull);
+    expect(find.text('Aceptando...'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('accept-offer-offer-a')),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('accept-offer-offer-b')),
+          )
+          .onPressed,
+      isNull,
+    );
     expect(repository.cancelRequests, 0);
 
     pendingSelection.complete(
@@ -397,7 +668,7 @@ void main() {
     await tester.tap(find.text('Cancelar viaje'));
     await _flushAsync(tester);
 
-    final selectButton = find.widgetWithText(FilledButton, 'Elegir conductor');
+    final selectButton = find.widgetWithText(FilledButton, 'Aceptar');
     expect(tester.widget<FilledButton>(selectButton).onPressed, isNull);
     expect(repository.selectRequests, 0);
 
@@ -553,6 +824,11 @@ Future<GoRouter> _pumpRoutedScreen(
         builder: (context, state) =>
             const Scaffold(body: Text('HOME_DESTINATION')),
       ),
+      GoRoute(
+        path: '/ride/:rideId/receipt',
+        builder: (context, state) =>
+            const Scaffold(body: Text('RECEIPT_DESTINATION')),
+      ),
     ],
   );
 
@@ -615,21 +891,37 @@ DioException _dioCancelNetworkError() {
   );
 }
 
-PassengerRide _ride({String status = 'SEARCHING_DRIVER', String? agreedFare}) {
+PassengerRide _ride({
+  String status = 'SEARCHING_DRIVER',
+  String? agreedFare,
+  num distanceMeters = 1500,
+  num estimatedDurationSeconds = 600,
+  String passengerOfferFare = '7.00',
+  String originAddress = 'Origen',
+  String destinationAddress = 'Destino',
+  double? originLatitude,
+  double? originLongitude,
+  double? destinationLatitude,
+  double? destinationLongitude,
+}) {
   return PassengerRide(
     id: 'ride-real',
     fareQuoteId: 'quote-1',
     status: status,
-    distanceMeters: 1500,
-    estimatedDurationSeconds: 600,
+    distanceMeters: distanceMeters,
+    estimatedDurationSeconds: estimatedDurationSeconds,
     estimatedFare: '7.00',
     estimatedPassengerFare: '7.00',
-    passengerOfferFare: '7.00',
+    passengerOfferFare: passengerOfferFare,
     agreedFare: agreedFare,
     currency: 'PEN',
     paymentMethod: 'CASH',
-    originAddress: 'Origen',
-    destinationAddress: 'Destino',
+    originLatitude: originLatitude,
+    originLongitude: originLongitude,
+    destinationLatitude: destinationLatitude,
+    destinationLongitude: destinationLongitude,
+    originAddress: originAddress,
+    destinationAddress: destinationAddress,
     requestedAt: DateTime.utc(2026, 8, 9),
     searchExpiresAt: null,
   );
@@ -642,18 +934,23 @@ PassengerRideOffer _offer({
   required bool isCounterOffer,
   String rideId = 'ride-real',
   DateTime? expiresAt,
+  String driverLastNameInitial = '',
+  double ratingAverage = 4.8,
+  int ratingCount = 10,
+  num distanceToOriginMeters = 300,
+  String passengerOfferFare = '7.00',
 }) {
   return PassengerRideOffer(
     offerId: offerId,
     rideId: rideId,
     driverProfileId: 'driver-$offerId',
     driverFirstName: driverName,
-    driverLastNameInitial: '',
+    driverLastNameInitial: driverLastNameInitial,
     photoUrl: null,
-    ratingAverage: 4.8,
-    ratingCount: 10,
-    distanceToOriginMeters: 300,
-    passengerOfferFare: '7.00',
+    ratingAverage: ratingAverage,
+    ratingCount: ratingCount,
+    distanceToOriginMeters: distanceToOriginMeters,
+    passengerOfferFare: passengerOfferFare,
     proposedFare: proposedFare,
     isCounterOffer: isCounterOffer,
     currency: 'PEN',

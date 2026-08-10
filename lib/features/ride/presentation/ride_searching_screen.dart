@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../data/ride_repository.dart';
 import '../domain/fare_amount.dart';
@@ -22,13 +23,26 @@ class RideSearchingScreen extends ConsumerStatefulWidget {
       _RideSearchingScreenState();
 }
 
-class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
+class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
+    with SingleTickerProviderStateMixin {
+  static const Color _darkGreen = Color(0xFF123B26);
+  static const Color _green = Color(0xFF1F7A3E);
+  static const Color _ctaYellow = Color(0xFFFFC72C);
+  static const Color _cream = Color(0xFFFFF9EC);
+  static const Color _secondaryCream = Color(0xFFFBF7EA);
+  static const Color _border = Color(0xFFE7E0CB);
+  static const Color _softBorder = Color(0xFFEFE8D4);
+  static const Color _primaryText = Color(0xFF16241C);
+  static const Color _secondaryText = Color(0xFF6F7E72);
+  static const Color _destinationColor = Color(0xFFD8542C);
+
   PassengerRide? _ride;
   PassengerRideStartCode? _startCode;
 
   List<PassengerRideOffer> _offers = const [];
 
   Timer? _timer;
+  late final AnimationController _radarController;
 
   bool _loading = true;
   bool _loadingRide = false;
@@ -46,6 +60,11 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
   void initState() {
     super.initState();
 
+    _radarController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
+
     _loadRide();
 
     _timer = Timer.periodic(const Duration(seconds: 3), (_) => _loadRide());
@@ -54,6 +73,7 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _radarController.dispose();
     super.dispose();
   }
 
@@ -376,20 +396,59 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('¿Cancelar la búsqueda?'),
-          content: const Text('Tu solicitud de viaje será cancelada.'),
+          backgroundColor: _cream,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: const BorderSide(color: _softBorder),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+          contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: const Text(
+            '¿Cancelar la búsqueda?',
+            style: TextStyle(
+              color: _primaryText,
+              fontSize: 21,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: const Text(
+            'Tu solicitud de viaje será cancelada.',
+            style: TextStyle(color: _secondaryText, fontSize: 15, height: 1.4),
+          ),
           actions: [
             TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: _green,
+                minimumSize: const Size(48, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
               onPressed: () {
                 Navigator.of(dialogContext).pop(false);
               },
-              child: const Text('Seguir buscando'),
+              child: const Text(
+                'Seguir buscando',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: _destinationColor,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(48, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(13),
+                ),
+              ),
               onPressed: () {
                 Navigator.of(dialogContext).pop(true);
               },
-              child: const Text('Cancelar viaje'),
+              child: const Text(
+                'Cancelar viaje',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
             ),
           ],
         );
@@ -676,6 +735,878 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
     );
   }
 
+  LatLng? _ridePoint(double? latitude, double? longitude) {
+    if (latitude == null ||
+        longitude == null ||
+        !latitude.isFinite ||
+        !longitude.isFinite ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180) {
+      return null;
+    }
+
+    return LatLng(latitude, longitude);
+  }
+
+  String _formatFare(String value) {
+    final cents = fareAmountInCents(value);
+
+    if (cents == null) {
+      return value.trim();
+    }
+
+    final whole = cents ~/ 100;
+    final decimals = (cents.abs() % 100).toString().padLeft(2, '0');
+
+    return '$whole.$decimals';
+  }
+
+  String? _formatRideDistance(num distanceMeters) {
+    final distance = distanceMeters.toDouble();
+
+    if (!distance.isFinite || distance <= 0) {
+      return null;
+    }
+
+    if (distance < 1000) {
+      return '${distance.round()} m';
+    }
+
+    return '${(distance / 1000).toStringAsFixed(1)} km';
+  }
+
+  String? _formatRideDuration(num durationSeconds) {
+    final duration = durationSeconds.toDouble();
+
+    if (!duration.isFinite || duration <= 0) {
+      return null;
+    }
+
+    final roundedMinutes = (duration / 60).round();
+    final minutes = roundedMinutes < 1 ? 1 : roundedMinutes;
+
+    return '$minutes min';
+  }
+
+  String _originLabel(PassengerRide ride) {
+    final address = ride.originAddress.trim();
+
+    if (address.isEmpty || address.toLowerCase() == 'origen') {
+      return 'Tu ubicación actual';
+    }
+
+    return address;
+  }
+
+  String _destinationLabel(PassengerRide ride) {
+    final address = ride.destinationAddress.trim();
+    return address.isEmpty ? 'Destino' : address;
+  }
+
+  String _driverName(PassengerRideOffer offer) {
+    final firstName = offer.driverFirstName.trim();
+    final rawInitial = offer.driverLastNameInitial.trim().replaceAll('.', '');
+
+    if (firstName.isEmpty || firstName == 'Conductor') {
+      return 'Conductor';
+    }
+
+    if (rawInitial.isEmpty) {
+      return firstName;
+    }
+
+    return '$firstName ${rawInitial[0].toUpperCase()}.';
+  }
+
+  String? _driverInitials(PassengerRideOffer offer) {
+    final firstName = offer.driverFirstName.trim();
+    final lastInitial = offer.driverLastNameInitial.trim().replaceAll('.', '');
+
+    if (firstName.isEmpty || firstName == 'Conductor') {
+      return null;
+    }
+
+    final buffer = StringBuffer();
+
+    buffer.write(firstName[0].toUpperCase());
+
+    if (lastInitial.isNotEmpty) {
+      buffer.write(lastInitial[0].toUpperCase());
+    }
+
+    final initials = buffer.toString();
+    return initials.isEmpty ? null : initials;
+  }
+
+  Widget _buildSearchingHeader() {
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        color: _cream,
+        border: Border(bottom: BorderSide(color: _softBorder)),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: Image.asset(
+              'assets/images/tukituki_logo.png',
+              width: 50,
+              height: 50,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  width: 50,
+                  height: 50,
+                  color: _green,
+                  alignment: Alignment.center,
+                  child: const Icon(
+                    Icons.two_wheeler,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'TukiTuki',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _darkGreen,
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Material(
+            color: _secondaryCream,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: _border),
+            ),
+            child: IconButton(
+              key: const ValueKey('cancel-search-close-button'),
+              tooltip: 'Cancelar búsqueda',
+              onPressed: _canceling || _selectingOfferId != null
+                  ? null
+                  : _cancelSearch,
+              icon: const Icon(Icons.close_rounded),
+              color: _darkGreen,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchRadar() {
+    return Column(
+      children: [
+        SizedBox(
+          key: const ValueKey('ride-search-radar'),
+          width: 100,
+          height: 100,
+          child: AnimatedBuilder(
+            animation: _radarController,
+            builder: (context, child) {
+              Widget ring(double phase) {
+                return Opacity(
+                  opacity: (1 - phase).clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: 0.62 + (phase * 0.5),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _green.withValues(alpha: 0.42),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              final firstPhase = _radarController.value;
+              final secondPhase = (_radarController.value + 0.5) % 1;
+
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned.fill(child: ring(firstPhase)),
+                  Positioned.fill(child: ring(secondPhase)),
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: const BoxDecoration(
+                      color: _ctaYellow,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.two_wheeler,
+                      color: _darkGreen,
+                      size: 28,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          'Buscando un conductor...',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: _primaryText,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.4,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Te avisaremos cuando llegue una propuesta.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: _secondaryText, fontSize: 15),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPassengerOffer(PassengerRide ride) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: _darkGreen,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: _darkGreen.withValues(alpha: 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.local_offer_outlined,
+              color: _ctaYellow,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Text(
+              'TU OFERTA',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ),
+          Text(
+            'S/ ${_formatFare(ride.passengerOfferFare)}',
+            key: const ValueKey('passenger-offer-fare'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRouteCard(PassengerRide ride) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _softBorder),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 14,
+                height: 14,
+                decoration: const BoxDecoration(
+                  color: _green,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.circle, size: 6, color: Colors.white),
+              ),
+              Container(width: 2, height: 52, color: _border),
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _destinationColor, width: 3),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Origen',
+                  style: TextStyle(
+                    color: _secondaryText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _originLabel(ride),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _primaryText,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 17),
+                const Text(
+                  'Destino',
+                  style: TextStyle(
+                    color: _secondaryText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _destinationLabel(ride),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _primaryText,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricChip({
+    required Key key,
+    required IconData icon,
+    required String label,
+  }) {
+    return Container(
+      key: key,
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      decoration: BoxDecoration(
+        color: _secondaryCream,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 17, color: _green),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: _primaryText,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner(String message) {
+    return Container(
+      key: const ValueKey('ride-search-error'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF1ED),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFF2C3B5)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline, color: _destinationColor, size: 21),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: _primaryText, height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModernDriverAvatar(PassengerRideOffer offer) {
+    final initials = _driverInitials(offer);
+    final photoUrl = offer.photoUrl?.trim();
+    final photoUri = photoUrl == null ? null : Uri.tryParse(photoUrl);
+
+    Widget fallback() {
+      return Container(
+        width: 54,
+        height: 54,
+        alignment: Alignment.center,
+        decoration: const BoxDecoration(
+          color: Color(0xFFE7F1E8),
+          shape: BoxShape.circle,
+        ),
+        child: initials == null
+            ? const Icon(Icons.person_outline, color: _green, size: 27)
+            : Text(
+                initials,
+                key: ValueKey('driver-initials-${offer.offerId}'),
+                style: const TextStyle(
+                  color: _darkGreen,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+      );
+    }
+
+    final hasValidPhoto =
+        photoUri != null &&
+        (photoUri.scheme == 'http' || photoUri.scheme == 'https') &&
+        photoUri.host.isNotEmpty;
+
+    if (!hasValidPhoto) {
+      return fallback();
+    }
+
+    return ClipOval(
+      child: Image.network(
+        photoUrl!,
+        width: 54,
+        height: 54,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => fallback(),
+      ),
+    );
+  }
+
+  Widget _buildOfferCard(PassengerRideOffer offer) {
+    final hasRating =
+        offer.ratingCount > 0 &&
+        offer.ratingAverage.isFinite &&
+        offer.ratingAverage > 0;
+    final driverDistance = _formatRideDistance(offer.distanceToOriginMeters);
+    final selectingThisOffer = _selectingOfferId == offer.offerId;
+
+    return Container(
+      key: ValueKey('driver-offer-${offer.offerId}'),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _softBorder),
+        boxShadow: [
+          BoxShadow(
+            color: _darkGreen.withValues(alpha: 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              _buildModernDriverAvatar(offer),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _driverName(offer),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _primaryText,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (hasRating || driverDistance != null) ...[
+                      const SizedBox(height: 7),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 6,
+                        children: [
+                          if (hasRating)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.star_rounded,
+                                  color: Color(0xFFE8A600),
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  offer.ratingAverage.toStringAsFixed(1),
+                                  key: ValueKey(
+                                    'driver-rating-${offer.offerId}',
+                                  ),
+                                  style: const TextStyle(
+                                    color: _primaryText,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          if (driverDistance != null)
+                            Text(
+                              'A $driverDistance de tu origen',
+                              style: const TextStyle(
+                                color: _secondaryText,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  offer.hasDifferentProposedFare
+                      ? 'Contraoferta del conductor'
+                      : 'Acepta tu precio',
+                  style: const TextStyle(
+                    color: _secondaryText,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'S/ ${_formatFare(offer.proposedFare)}',
+                key: ValueKey('driver-fare-${offer.offerId}'),
+                style: const TextStyle(
+                  color: _darkGreen,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                ),
+              ),
+            ],
+          ),
+          if (offer.hasDifferentProposedFare) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Tu oferta: S/ ${_formatFare(offer.passengerOfferFare)}',
+              style: const TextStyle(color: _secondaryText, fontSize: 13),
+            ),
+          ],
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 48,
+            child: FilledButton(
+              key: ValueKey('accept-offer-${offer.offerId}'),
+              onPressed: _selectingOfferId != null || _canceling
+                  ? null
+                  : () => _selectOffer(offer),
+              style: FilledButton.styleFrom(
+                backgroundColor: _green,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: _green.withValues(alpha: 0.42),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: selectingThisOffer
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(width: 9),
+                        Text('Aceptando...'),
+                      ],
+                    )
+                  : const Text(
+                      'Aceptar',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchingScaffold(PassengerRide ride) {
+    final origin = _ridePoint(ride.originLatitude, ride.originLongitude);
+    final destination = _ridePoint(
+      ride.destinationLatitude,
+      ride.destinationLongitude,
+    );
+    final distance = _formatRideDistance(ride.distanceMeters);
+    final duration = _formatRideDuration(ride.estimatedDurationSeconds);
+
+    return Scaffold(
+      backgroundColor: _cream,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildSearchingHeader(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: SizedBox(
+                  height: 156,
+                  child: origin != null || destination != null
+                      ? _RideRouteMap(origin: origin, destination: destination)
+                      : Container(
+                          key: const ValueKey('ride-search-map-placeholder'),
+                          color: _secondaryCream,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.map_outlined, color: _green, size: 30),
+                              SizedBox(height: 8),
+                              Text(
+                                'La ubicación del viaje no está disponible.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: _secondaryText,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                key: const ValueKey('ride-search-scroll'),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildSearchRadar(),
+                        const SizedBox(height: 18),
+                        _buildPassengerOffer(ride),
+                        const SizedBox(height: 16),
+                        _buildRouteCard(ride),
+                        if (distance != null || duration != null) ...[
+                          const SizedBox(height: 12),
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: 10,
+                            runSpacing: 8,
+                            children: [
+                              if (distance != null)
+                                _buildMetricChip(
+                                  key: const ValueKey('ride-distance-chip'),
+                                  icon: Icons.straighten_rounded,
+                                  label: distance,
+                                ),
+                              if (duration != null)
+                                _buildMetricChip(
+                                  key: const ValueKey('ride-duration-chip'),
+                                  icon: Icons.schedule_rounded,
+                                  label: duration,
+                                ),
+                            ],
+                          ),
+                        ],
+                        if (_error != null) ...[
+                          const SizedBox(height: 18),
+                          _buildErrorBanner(_error!),
+                        ],
+                        const SizedBox(height: 26),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Conductores interesados',
+                                style: TextStyle(
+                                  color: _primaryText,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.25,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              key: const ValueKey('offers-count'),
+                              constraints: const BoxConstraints(minWidth: 34),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _ctaYellow,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '${_offers.length}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: _darkGreen,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        if (_offers.isEmpty && _error == null)
+                          Container(
+                            key: const ValueKey('offers-empty-state'),
+                            padding: const EdgeInsets.all(22),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: _softBorder),
+                            ),
+                            child: Column(
+                              children: [
+                                if (_loadingOffers) ...[
+                                  const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      color: _green,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                const Text(
+                                  'Todavía no hay conductores interesados.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: _primaryText,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Seguimos buscando por ti.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: _secondaryText),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          for (final offer in _offers) ...[
+                            _buildOfferCard(offer),
+                            const SizedBox(height: 12),
+                          ],
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          key: const ValueKey('cancel-search-button'),
+                          onPressed: _canceling || _selectingOfferId != null
+                              ? null
+                              : _cancelSearch,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _destinationColor,
+                            side: const BorderSide(color: Color(0xFFE6B6A8)),
+                            minimumSize: const Size.fromHeight(50),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                          ),
+                          icon: _canceling
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: _destinationColor,
+                                  ),
+                                )
+                              : const Icon(Icons.close_rounded),
+                          label: Text(
+                            _canceling ? 'Cancelando...' : 'Cancelar búsqueda',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -688,7 +1619,7 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
 
     if (ride == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Tu TukiTuki')),
+        appBar: AppBar(title: const Text('TukiTuki')),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -701,9 +1632,13 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
       );
     }
 
+    if (ride.status == 'SEARCHING_DRIVER') {
+      return _buildSearchingScaffold(ride);
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tu TukiTuki'),
+        title: const Text('TukiTuki'),
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
@@ -1041,7 +1976,7 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
                         ),
                         SizedBox(height: 8),
                         Text(
-                          'Tu TukiTuki está en camino '
+                          'TukiTuki está en camino '
                           'al destino.',
                           textAlign: TextAlign.center,
                         ),
@@ -1107,6 +2042,163 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _RideRouteMap extends StatefulWidget {
+  const _RideRouteMap({required this.origin, required this.destination});
+
+  final LatLng? origin;
+  final LatLng? destination;
+
+  @override
+  State<_RideRouteMap> createState() => _RideRouteMapState();
+}
+
+class _RideRouteMapState extends State<_RideRouteMap> {
+  GoogleMapController? _controller;
+  String? _lastCameraGeometry;
+
+  @override
+  void didUpdateWidget(covariant _RideRouteMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.origin != widget.origin ||
+        oldWidget.destination != widget.destination) {
+      _scheduleCameraUpdate();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  String get _geometrySignature {
+    final origin = widget.origin;
+    final destination = widget.destination;
+
+    return '${origin?.latitude},${origin?.longitude}|'
+        '${destination?.latitude},${destination?.longitude}';
+  }
+
+  LatLng get _initialTarget {
+    final origin = widget.origin;
+    final destination = widget.destination;
+
+    if (origin != null && destination != null) {
+      return LatLng(
+        (origin.latitude + destination.latitude) / 2,
+        (origin.longitude + destination.longitude) / 2,
+      );
+    }
+
+    return origin ?? destination!;
+  }
+
+  bool _areDistinct(LatLng first, LatLng second) {
+    return (first.latitude - second.latitude).abs() > 0.00001 ||
+        (first.longitude - second.longitude).abs() > 0.00001;
+  }
+
+  void _scheduleCameraUpdate() {
+    final controller = _controller;
+    final geometry = _geometrySignature;
+
+    if (controller == null || geometry == _lastCameraGeometry) {
+      return;
+    }
+
+    _lastCameraGeometry = geometry;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _controller != controller) {
+        return;
+      }
+
+      final origin = widget.origin;
+      final destination = widget.destination;
+
+      try {
+        if (origin != null &&
+            destination != null &&
+            _areDistinct(origin, destination)) {
+          final southwest = LatLng(
+            origin.latitude < destination.latitude
+                ? origin.latitude
+                : destination.latitude,
+            origin.longitude < destination.longitude
+                ? origin.longitude
+                : destination.longitude,
+          );
+          final northeast = LatLng(
+            origin.latitude > destination.latitude
+                ? origin.latitude
+                : destination.latitude,
+            origin.longitude > destination.longitude
+                ? origin.longitude
+                : destination.longitude,
+          );
+
+          await controller.animateCamera(
+            CameraUpdate.newLatLngBounds(
+              LatLngBounds(southwest: southwest, northeast: northeast),
+              42,
+            ),
+          );
+        } else {
+          await controller.animateCamera(
+            CameraUpdate.newLatLngZoom(origin ?? destination!, 16),
+          );
+        }
+      } catch (error) {
+        debugPrint('No se pudo ajustar el mapa del viaje: $error');
+      }
+    });
+  }
+
+  Set<Marker> get _markers {
+    return {
+      if (widget.origin != null)
+        Marker(
+          markerId: const MarkerId('ride-origin'),
+          position: widget.origin!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueGreen,
+          ),
+          infoWindow: const InfoWindow(title: 'Origen'),
+        ),
+      if (widget.destination != null)
+        Marker(
+          markerId: const MarkerId('ride-destination'),
+          position: widget.destination!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueOrange,
+          ),
+          infoWindow: const InfoWindow(title: 'Destino'),
+        ),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GoogleMap(
+      key: const ValueKey('ride-search-google-map'),
+      initialCameraPosition: CameraPosition(target: _initialTarget, zoom: 14),
+      markers: _markers,
+      myLocationEnabled: false,
+      myLocationButtonEnabled: false,
+      zoomControlsEnabled: false,
+      compassEnabled: false,
+      mapToolbarEnabled: false,
+      rotateGesturesEnabled: false,
+      tiltGesturesEnabled: false,
+      onMapCreated: (controller) {
+        _controller = controller;
+        _scheduleCameraUpdate();
+      },
     );
   }
 }
