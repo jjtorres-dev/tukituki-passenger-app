@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:passenger/features/ride/data/ride_repository.dart';
 import 'package:passenger/features/ride/domain/passenger_ride.dart';
 import 'package:passenger/features/ride/domain/passenger_ride_offer.dart';
@@ -203,6 +204,242 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('SEARCHING_DRIVER permite iniciar cancelación', (tester) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => const [],
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    final cancelButton = find.byKey(const ValueKey('cancel-search-button'));
+    expect(tester.widget<OutlinedButton>(cancelButton).onPressed, isNotNull);
+
+    await _openCancelDialog(tester);
+
+    expect(find.text('¿Cancelar la búsqueda?'), findsOneWidget);
+    expect(find.text('Tu solicitud de viaje será cancelada.'), findsOneWidget);
+  });
+
+  testWidgets('Seguir buscando cierra diálogo sin llamar cancelRide', (
+    tester,
+  ) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => const [],
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    await _openCancelDialog(tester);
+    await tester.tap(find.text('Seguir buscando'));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(repository.cancelRequests, 0);
+    expect(router.routeInformationProvider.value.uri.path, '/ride/ride-real');
+    expect(find.text('Buscando un conductor...'), findsOneWidget);
+  });
+
+  testWidgets('confirmar y doble tap producen una sola cancelación', (
+    tester,
+  ) async {
+    final pendingCancellation = Completer<PassengerRide>();
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => const [],
+      onCancelRide: (_) => pendingCancellation.future,
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    await _openCancelDialog(tester);
+    await tester.tap(find.text('Cancelar viaje'));
+    await _flushAsync(tester);
+
+    final cancelButton = find.byKey(const ValueKey('cancel-search-button'));
+    expect(repository.cancelRequests, 1);
+    expect(tester.widget<OutlinedButton>(cancelButton).onPressed, isNull);
+
+    await tester.tap(cancelButton);
+    await _flushAsync(tester);
+    expect(repository.cancelRequests, 1);
+
+    pendingCancellation.completeError(_dioCancelError(409));
+    await _flushAsync(tester);
+  });
+
+  testWidgets('cancelación CANCELLED limpia y navega a home', (tester) async {
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => [
+        _offer(
+          offerId: 'offer-a',
+          driverName: 'Carlos',
+          proposedFare: '7.00',
+          isCounterOffer: false,
+        ),
+      ],
+      onCancelRide: (_) async => _ride(status: 'CANCELLED'),
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    expect(find.text('Carlos'), findsOneWidget);
+
+    await _openCancelDialog(tester);
+    await tester.tap(find.text('Cancelar viaje'));
+    await tester.pumpAndSettle();
+
+    expect(repository.cancelRequests, 1);
+    expect(repository.cancelledRideId, 'ride-real');
+    expect(router.routeInformationProvider.value.uri.path, '/home');
+    expect(find.text('HOME_DESTINATION'), findsOneWidget);
+    expect(find.text('Carlos'), findsNothing);
+  });
+
+  testWidgets('error de cancelación mantiene pantalla y reanuda polling', (
+    tester,
+  ) async {
+    final pendingCancellation = Completer<PassengerRide>();
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => const [],
+      onCancelRide: (_) => pendingCancellation.future,
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    await _openCancelDialog(tester);
+    await tester.tap(find.text('Cancelar viaje'));
+    await _flushAsync(tester);
+
+    await tester.pump(const Duration(seconds: 3));
+    expect(repository.activeRideRequests, 1);
+
+    pendingCancellation.completeError(_dioCancelNetworkError());
+    await _flushAsync(tester);
+
+    expect(router.routeInformationProvider.value.uri.path, '/ride/ride-real');
+    expect(
+      find.text(
+        'No se pudo conectar con TukiTuki. '
+        'Revisa tu conexión e intenta nuevamente.',
+      ),
+      findsWidgets,
+    );
+
+    await tester.pump(const Duration(seconds: 3));
+    await _flushAsync(tester);
+    expect(repository.activeRideRequests, 2);
+  });
+
+  testWidgets('mientras selecciona oferta la cancelación está bloqueada', (
+    tester,
+  ) async {
+    final pendingSelection = Completer<PassengerRide>();
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => [
+        _offer(
+          offerId: 'offer-a',
+          driverName: 'Carlos',
+          proposedFare: '7.00',
+          isCounterOffer: false,
+        ),
+      ],
+      onSelectRideOffer: ({required rideId, required offerId}) =>
+          pendingSelection.future,
+    );
+
+    await _pumpScreen(tester, repository);
+    addTearDown(() => _disposeScreen(tester));
+
+    final selectButton = find.text('Elegir conductor');
+    await tester.ensureVisible(selectButton);
+    await tester.tap(selectButton);
+    await _flushAsync(tester);
+
+    final cancelButton = find.byKey(const ValueKey('cancel-search-button'));
+    expect(tester.widget<OutlinedButton>(cancelButton).onPressed, isNull);
+    expect(repository.cancelRequests, 0);
+
+    pendingSelection.complete(
+      _ride(status: 'DRIVER_ASSIGNED', agreedFare: '7.00'),
+    );
+    await _flushAsync(tester);
+  });
+
+  testWidgets('mientras cancela no permite aceptar propuesta', (tester) async {
+    final pendingCancellation = Completer<PassengerRide>();
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () async => _ride(),
+      onGetRideOffers: (_) async => [
+        _offer(
+          offerId: 'offer-a',
+          driverName: 'Carlos',
+          proposedFare: '7.00',
+          isCounterOffer: false,
+        ),
+      ],
+      onCancelRide: (_) => pendingCancellation.future,
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    await _openCancelDialog(tester);
+    await tester.tap(find.text('Cancelar viaje'));
+    await _flushAsync(tester);
+
+    final selectButton = find.widgetWithText(FilledButton, 'Elegir conductor');
+    expect(tester.widget<FilledButton>(selectButton).onPressed, isNull);
+    expect(repository.selectRequests, 0);
+
+    pendingCancellation.complete(_ride(status: 'CANCELLED'));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('polling viejo no revierte cancelación exitosa', (tester) async {
+    final staleRideResponse = Completer<PassengerRide?>();
+    var activeRequest = 0;
+    final repository = _FakeRideRepository(
+      onGetActiveRide: () {
+        activeRequest++;
+
+        if (activeRequest == 1) {
+          return Future.value(_ride());
+        }
+
+        return staleRideResponse.future;
+      },
+      onGetRideOffers: (_) async => const [],
+      onCancelRide: (_) async => _ride(status: 'CANCELLED'),
+    );
+    final router = await _pumpRoutedScreen(tester, repository);
+    addTearDown(router.dispose);
+    addTearDown(() => _disposeScreen(tester));
+
+    await tester.pump(const Duration(seconds: 3));
+    expect(repository.activeRideRequests, 2);
+
+    await _openCancelDialog(tester);
+    await tester.tap(find.text('Cancelar viaje'));
+    await tester.pumpAndSettle();
+
+    expect(router.routeInformationProvider.value.uri.path, '/home');
+
+    staleRideResponse.complete(_ride());
+    await _flushAsync(tester);
+
+    expect(router.routeInformationProvider.value.uri.path, '/home');
+    expect(find.text('Buscando un conductor...'), findsNothing);
+  });
 }
 
 class _FakeRideRepository extends RideRepository {
@@ -210,6 +447,7 @@ class _FakeRideRepository extends RideRepository {
     required this.onGetActiveRide,
     required this.onGetRideOffers,
     this.onSelectRideOffer,
+    this.onCancelRide,
   }) : super(Dio());
 
   final Future<PassengerRide?> Function() onGetActiveRide;
@@ -220,11 +458,14 @@ class _FakeRideRepository extends RideRepository {
     required String offerId,
   })?
   onSelectRideOffer;
+  final Future<PassengerRide> Function(String rideId)? onCancelRide;
 
   int activeRideRequests = 0;
   int selectRequests = 0;
+  int cancelRequests = 0;
   String? selectedRideId;
   String? selectedOfferId;
+  String? cancelledRideId;
 
   @override
   Future<PassengerRide?> getActiveRide() {
@@ -254,6 +495,20 @@ class _FakeRideRepository extends RideRepository {
 
     return handler(rideId: rideId, offerId: offerId);
   }
+
+  @override
+  Future<PassengerRide> cancelRide({required String rideId}) {
+    cancelRequests++;
+    cancelledRideId = rideId;
+
+    final handler = onCancelRide;
+
+    if (handler == null) {
+      throw StateError('Cancel no configurado');
+    }
+
+    return handler(rideId);
+  }
 }
 
 Future<void> _pumpScreen(
@@ -280,6 +535,45 @@ Future<void> _flushAsync(WidgetTester tester) async {
   }
 }
 
+Future<GoRouter> _pumpRoutedScreen(
+  WidgetTester tester,
+  RideRepository repository, {
+  String routeRideId = 'ride-real',
+}) async {
+  final router = GoRouter(
+    initialLocation: '/ride/$routeRideId',
+    routes: [
+      GoRoute(
+        path: '/ride/:rideId',
+        builder: (context, state) =>
+            RideSearchingScreen(rideId: state.pathParameters['rideId']!),
+      ),
+      GoRoute(
+        path: '/home',
+        builder: (context, state) =>
+            const Scaffold(body: Text('HOME_DESTINATION')),
+      ),
+    ],
+  );
+
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [rideRepositoryProvider.overrideWithValue(repository)],
+      child: MaterialApp.router(routerConfig: router),
+    ),
+  );
+  await _flushAsync(tester);
+
+  return router;
+}
+
+Future<void> _openCancelDialog(WidgetTester tester) async {
+  final cancelButton = find.byKey(const ValueKey('cancel-search-button'));
+  await tester.ensureVisible(cancelButton);
+  await tester.tap(cancelButton);
+  await tester.pump(const Duration(milliseconds: 250));
+}
+
 Future<void> _disposeScreen(WidgetTester tester) async {
   await tester.pumpWidget(const SizedBox.shrink());
   await tester.pump();
@@ -296,6 +590,28 @@ DioException _dioError(int statusCode) {
       requestOptions: requestOptions,
       statusCode: statusCode,
     ),
+  );
+}
+
+DioException _dioCancelError(int statusCode) {
+  final requestOptions = RequestOptions(
+    path: 'passenger/rides/ride-real/cancel',
+  );
+
+  return DioException(
+    requestOptions: requestOptions,
+    response: Response<void>(
+      requestOptions: requestOptions,
+      statusCode: statusCode,
+    ),
+  );
+}
+
+DioException _dioCancelNetworkError() {
+  return DioException(
+    requestOptions: RequestOptions(path: 'passenger/rides/ride-real/cancel'),
+    type: DioExceptionType.connectionError,
+    error: StateError('offline'),
   );
 }
 

@@ -13,10 +13,7 @@ import '../domain/passenger_ride_start_code.dart';
 import '../domain/ride_offer_filter.dart';
 
 class RideSearchingScreen extends ConsumerStatefulWidget {
-  const RideSearchingScreen({
-    required this.rideId,
-    super.key,
-  });
+  const RideSearchingScreen({required this.rideId, super.key});
 
   final String rideId;
 
@@ -25,8 +22,7 @@ class RideSearchingScreen extends ConsumerStatefulWidget {
       _RideSearchingScreenState();
 }
 
-class _RideSearchingScreenState
-    extends ConsumerState<RideSearchingScreen> {
+class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen> {
   PassengerRide? _ride;
   PassengerRideStartCode? _startCode;
 
@@ -39,6 +35,7 @@ class _RideSearchingScreenState
   bool _loadingStartCode = false;
   bool _loadingOffers = false;
   bool _navigatingAway = false;
+  bool _canceling = false;
 
   int _stateGeneration = 0;
 
@@ -51,10 +48,7 @@ class _RideSearchingScreenState
 
     _loadRide();
 
-    _timer = Timer.periodic(
-      const Duration(seconds: 3),
-      (_) => _loadRide(),
-    );
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _loadRide());
   }
 
   @override
@@ -66,6 +60,7 @@ class _RideSearchingScreenState
   Future<void> _loadRide() async {
     if (_navigatingAway ||
         _loadingRide ||
+        _canceling ||
         _selectingOfferId != null) {
       return;
     }
@@ -74,14 +69,12 @@ class _RideSearchingScreenState
     _loadingRide = true;
 
     try {
-      final repository =
-          ref.read(rideRepositoryProvider);
+      final repository = ref.read(rideRepositoryProvider);
 
       // Primero consultamos el viaje activo real.
       // Si ya terminó, active puede devolver 404,
       // por eso luego consultamos el viaje por ID.
-      final activeRide =
-          await repository.getActiveRide();
+      final activeRide = await repository.getActiveRide();
 
       if (!_canApplyGeneration(requestGeneration)) {
         return;
@@ -92,9 +85,7 @@ class _RideSearchingScreenState
       if (activeRide != null) {
         ride = activeRide;
       } else {
-        ride = await repository.getRide(
-          widget.rideId,
-        );
+        ride = await repository.getRide(widget.rideId);
       }
 
       if (!_canApplyGeneration(requestGeneration)) {
@@ -108,10 +99,7 @@ class _RideSearchingScreenState
       });
 
       if (ride.status == 'SEARCHING_DRIVER') {
-        await _loadRideOffers(
-          ride.id,
-          generation: requestGeneration,
-        );
+        await _loadRideOffers(ride.id, generation: requestGeneration);
       } else if (_offers.isNotEmpty) {
         setState(() {
           _offers = const [];
@@ -135,9 +123,7 @@ class _RideSearchingScreenState
 
         _navigatingAway = true;
 
-        context.go(
-          '/ride/${ride.id}/receipt',
-        );
+        context.go('/ride/${ride.id}/receipt');
 
         return;
       }
@@ -148,15 +134,12 @@ class _RideSearchingScreenState
       if (ride.status == 'DRIVER_ARRIVED' &&
           _startCode == null &&
           !_loadingStartCode) {
-        await _loadStartCodeForRide(
-          ride.id,
-        );
+        await _loadStartCodeForRide(ride.id);
       }
 
       // Cuando el viaje ya empezó,
       // dejamos de mostrar el código.
-      if (ride.status == 'IN_PROGRESS' &&
-          _startCode != null) {
+      if (ride.status == 'IN_PROGRESS' && _startCode != null) {
         if (!mounted) {
           return;
         }
@@ -171,9 +154,7 @@ class _RideSearchingScreenState
         _timer?.cancel();
       }
     } catch (error) {
-      debugPrint(
-        'Error actualizando viaje del pasajero: $error',
-      );
+      debugPrint('Error actualizando viaje del pasajero: $error');
 
       if (!_canApplyGeneration(requestGeneration)) {
         return;
@@ -181,8 +162,7 @@ class _RideSearchingScreenState
 
       setState(() {
         _loading = false;
-        _error =
-            'No se pudo actualizar el viaje.';
+        _error = 'No se pudo actualizar el viaje.';
       });
     } finally {
       _loadingRide = false;
@@ -190,17 +170,13 @@ class _RideSearchingScreenState
   }
 
   bool _canApplyGeneration(int generation) {
-    return mounted &&
-        !_navigatingAway &&
-        generation == _stateGeneration;
+    return mounted && !_navigatingAway && generation == _stateGeneration;
   }
 
-  Future<void> _loadRideOffers(
-    String rideId, {
-    required int generation,
-  }) async {
+  Future<void> _loadRideOffers(String rideId, {required int generation}) async {
     if (_loadingOffers ||
         _navigatingAway ||
+        _canceling ||
         _selectingOfferId != null) {
       return;
     }
@@ -213,6 +189,7 @@ class _RideSearchingScreenState
           .getRideOffers(rideId);
 
       if (!_canApplyGeneration(generation) ||
+          _canceling ||
           _selectingOfferId != null ||
           _ride?.id != rideId ||
           _ride?.status != 'SEARCHING_DRIVER') {
@@ -231,8 +208,7 @@ class _RideSearchingScreenState
 
       final statusCode = error.response?.statusCode;
 
-      if ((statusCode == 404 ||
-              statusCode == 409) &&
+      if ((statusCode == 404 || statusCode == 409) &&
           _canApplyGeneration(generation)) {
         setState(() {
           _offers = const [];
@@ -247,19 +223,14 @@ class _RideSearchingScreenState
         });
       }
     } catch (error) {
-      debugPrint(
-        'PASSENGER OFFERS ERROR inesperado: $error',
-      );
+      debugPrint('PASSENGER OFFERS ERROR inesperado: $error');
     } finally {
       _loadingOffers = false;
     }
   }
 
-  Future<void> _selectOffer(
-    PassengerRideOffer offer,
-  ) async {
-    if (_selectingOfferId != null ||
-        _navigatingAway) {
+  Future<void> _selectOffer(PassengerRideOffer offer) async {
+    if (_selectingOfferId != null || _canceling || _navigatingAway) {
       return;
     }
 
@@ -290,18 +261,13 @@ class _RideSearchingScreenState
 
     final expiresAt = offer.expiresAt;
 
-    if (expiresAt != null &&
-        !expiresAt.isAfter(DateTime.now())) {
+    if (expiresAt != null && !expiresAt.isAfter(DateTime.now())) {
       setState(() {
         _offers = visibleRideOffers(_offers);
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Esta propuesta ya no está disponible.',
-          ),
-        ),
+        const SnackBar(content: Text('Esta propuesta ya no está disponible.')),
       );
 
       return;
@@ -317,10 +283,7 @@ class _RideSearchingScreenState
     try {
       final ride = await ref
           .read(rideRepositoryProvider)
-          .selectRideOffer(
-            rideId: currentRideId,
-            offerId: offer.offerId,
-          );
+          .selectRideOffer(rideId: currentRideId, offerId: offer.offerId);
 
       if (!_canApplyGeneration(selectionGeneration)) {
         return;
@@ -329,11 +292,7 @@ class _RideSearchingScreenState
       final agreedFare = ride.agreedFare;
 
       if (agreedFare != null &&
-          fareAmountsDiffer(
-                agreedFare,
-                offer.proposedFare,
-              ) ==
-              true) {
+          fareAmountsDiffer(agreedFare, offer.proposedFare) == true) {
         debugPrint(
           'PASSENGER SELECT OFFER FARE MISMATCH '
           'offerFare=${offer.proposedFare} '
@@ -372,29 +331,23 @@ class _RideSearchingScreenState
         return;
       }
 
-      String message =
-          'No se pudo elegir este conductor.';
+      String message = 'No se pudo elegir este conductor.';
 
       if (error.response?.statusCode == 409) {
-        message =
-            'Esta propuesta ya no está disponible.';
+        message = 'Esta propuesta ya no está disponible.';
       } else if (error.response?.statusCode == 404) {
-        message =
-            'No encontramos esta propuesta.';
+        message = 'No encontramos esta propuesta.';
       } else if (error.response == null) {
-        message =
-            'No se pudo conectar con TukiTuki.';
+        message = 'No se pudo conectar con TukiTuki.';
       }
 
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       if (_canApplyGeneration(selectionGeneration)) {
         setState(() {
@@ -403,17 +356,186 @@ class _RideSearchingScreenState
       }
     }
 
-    if (refreshAfterFailure &&
-        _canApplyGeneration(selectionGeneration)) {
+    if (refreshAfterFailure && _canApplyGeneration(selectionGeneration)) {
       await _loadRide();
     }
   }
 
-  Future<void> _loadStartCodeForRide(
-    String rideId,
-  ) async {
-    if (_loadingStartCode ||
-        _navigatingAway) {
+  Future<void> _cancelSearch() async {
+    if (_canceling || _selectingOfferId != null || _navigatingAway) {
+      return;
+    }
+
+    final currentRide = _ride;
+
+    if (currentRide == null || currentRide.status != 'SEARCHING_DRIVER') {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('¿Cancelar la búsqueda?'),
+          content: const Text('Tu solicitud de viaje será cancelada.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Seguir buscando'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Cancelar viaje'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true ||
+        !mounted ||
+        _canceling ||
+        _selectingOfferId != null ||
+        _navigatingAway ||
+        _ride?.id != currentRide.id ||
+        _ride?.status != 'SEARCHING_DRIVER') {
+      return;
+    }
+
+    final cancellationGeneration = ++_stateGeneration;
+
+    setState(() {
+      _canceling = true;
+      _error = null;
+    });
+
+    try {
+      final ride = await ref
+          .read(rideRepositoryProvider)
+          .cancelRide(rideId: currentRide.id);
+
+      if (!_canApplyGeneration(cancellationGeneration)) {
+        return;
+      }
+
+      if (ride.status != 'CANCELLED') {
+        setState(() {
+          _ride = ride;
+          if (ride.status != 'SEARCHING_DRIVER') {
+            _offers = const [];
+          }
+          _error =
+              'No se pudo confirmar la cancelación del viaje. '
+              'El estado actual es ${ride.status}.';
+        });
+        return;
+      }
+
+      _timer?.cancel();
+
+      setState(() {
+        _ride = ride;
+        _offers = const [];
+        _error = null;
+      });
+
+      if (!mounted || _navigatingAway) {
+        return;
+      }
+
+      _navigatingAway = true;
+      context.go('/home');
+    } on DioException catch (error) {
+      if (!_canApplyGeneration(cancellationGeneration)) {
+        return;
+      }
+
+      final message = _cancelErrorMessage(error);
+
+      setState(() {
+        _error = message;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      debugPrint('Error cancelando búsqueda del pasajero: $error');
+
+      if (!_canApplyGeneration(cancellationGeneration)) {
+        return;
+      }
+
+      const message = 'No se pudo cancelar la búsqueda. Intenta nuevamente.';
+
+      setState(() {
+        _error = message;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(message)));
+    } finally {
+      if (_canApplyGeneration(cancellationGeneration)) {
+        setState(() {
+          _canceling = false;
+        });
+      }
+    }
+  }
+
+  String _cancelErrorMessage(DioException error) {
+    switch (error.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return 'TukiTuki está tardando más de lo esperado. '
+            'Intenta cancelar nuevamente.';
+
+      case DioExceptionType.connectionError:
+        return 'No se pudo conectar con TukiTuki. '
+            'Revisa tu conexión e intenta nuevamente.';
+
+      default:
+        final statusCode = error.response?.statusCode;
+
+        if (statusCode == 400) {
+          return 'No se pudo cancelar la búsqueda. '
+              'Revisa el estado del viaje.';
+        }
+
+        if (statusCode == 401) {
+          return 'Tu sesión ya no es válida. '
+              'Intenta iniciar sesión nuevamente.';
+        }
+
+        if (statusCode == 403) {
+          return 'No tienes permiso para cancelar este viaje.';
+        }
+
+        if (statusCode == 404) {
+          return 'No encontramos este viaje.';
+        }
+
+        if (statusCode == 409) {
+          return 'El viaje cambió de estado y ya no puede cancelarse.';
+        }
+
+        if (statusCode != null && statusCode >= 500) {
+          return 'TukiTuki no está disponible temporalmente. '
+              'Intenta cancelar nuevamente.';
+        }
+
+        return 'No se pudo cancelar la búsqueda. Intenta nuevamente.';
+    }
+  }
+
+  Future<void> _loadStartCodeForRide(String rideId) async {
+    if (_loadingStartCode || _navigatingAway) {
       return;
     }
 
@@ -422,9 +544,7 @@ class _RideSearchingScreenState
     });
 
     try {
-      final code = await ref
-          .read(rideRepositoryProvider)
-          .getStartCode(rideId);
+      final code = await ref.read(rideRepositoryProvider).getStartCode(rideId);
 
       if (!mounted || _navigatingAway) {
         return;
@@ -434,9 +554,7 @@ class _RideSearchingScreenState
         _startCode = code;
       });
     } catch (error) {
-      debugPrint(
-        'Error obteniendo código de inicio: $error',
-      );
+      debugPrint('Error obteniendo código de inicio: $error');
 
       if (!mounted || _navigatingAway) {
         return;
@@ -444,9 +562,7 @@ class _RideSearchingScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'No se pudo obtener el código de inicio.',
-          ),
+          content: Text('No se pudo obtener el código de inicio.'),
         ),
       );
     } finally {
@@ -526,9 +642,7 @@ class _RideSearchingScreenState
     }
   }
 
-  String _formatDriverDistance(
-    num distanceMeters,
-  ) {
+  String _formatDriverDistance(num distanceMeters) {
     if (distanceMeters < 1000) {
       return '${distanceMeters.round()} m';
     }
@@ -536,19 +650,13 @@ class _RideSearchingScreenState
     return '${(distanceMeters / 1000).toStringAsFixed(1)} km';
   }
 
-  Widget _buildDriverAvatar(
-    PassengerRideOffer offer,
-  ) {
+  Widget _buildDriverAvatar(PassengerRideOffer offer) {
     final photoUrl = offer.photoUrl;
 
-    if (photoUrl == null ||
-        photoUrl.trim().isEmpty) {
+    if (photoUrl == null || photoUrl.trim().isEmpty) {
       return const CircleAvatar(
         radius: 28,
-        child: Icon(
-          Icons.person,
-          size: 30,
-        ),
+        child: Icon(Icons.person, size: 30),
       );
     }
 
@@ -558,17 +666,10 @@ class _RideSearchingScreenState
         width: 56,
         height: 56,
         fit: BoxFit.cover,
-        errorBuilder: (
-          context,
-          error,
-          stackTrace,
-        ) {
+        errorBuilder: (context, error, stackTrace) {
           return const CircleAvatar(
             radius: 28,
-            child: Icon(
-              Icons.person,
-              size: 30,
-            ),
+            child: Icon(Icons.person, size: 30),
           );
         },
       ),
@@ -579,11 +680,7 @@ class _RideSearchingScreenState
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: CircularProgressIndicator(),
-          ),
-        ),
+        body: SafeArea(child: Center(child: CircularProgressIndicator())),
       );
     }
 
@@ -591,17 +688,12 @@ class _RideSearchingScreenState
 
     if (ride == null) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text(
-            'Tu TukiTuki',
-          ),
-        ),
+        appBar: AppBar(title: const Text('Tu TukiTuki')),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              _error ??
-                  'No encontramos un viaje activo.',
+              _error ?? 'No encontramos un viaje activo.',
               textAlign: TextAlign.center,
             ),
           ),
@@ -611,36 +703,27 @@ class _RideSearchingScreenState
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Tu TukiTuki',
-        ),
+        title: const Text('Tu TukiTuki'),
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 40),
 
-              if (ride.status ==
-                  'SEARCHING_DRIVER')
+              if (ride.status == 'SEARCHING_DRIVER')
                 const Center(
                   child: SizedBox(
                     width: 80,
                     height: 80,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 7,
-                    ),
+                    child: CircularProgressIndicator(strokeWidth: 7),
                   ),
                 )
               else
-                Icon(
-                  _statusIcon(ride.status),
-                  size: 90,
-                ),
+                Icon(_statusIcon(ride.status), size: 90),
 
               const SizedBox(height: 32),
 
@@ -656,10 +739,7 @@ class _RideSearchingScreenState
               const SizedBox(height: 16),
 
               if (ride.status == 'SEARCHING_DRIVER') ...[
-                const Text(
-                  'Tu oferta',
-                  textAlign: TextAlign.center,
-                ),
+                const Text('Tu oferta', textAlign: TextAlign.center),
                 const SizedBox(height: 6),
                 Text(
                   'S/ ${ride.passengerOfferFare}',
@@ -684,34 +764,21 @@ class _RideSearchingScreenState
 
               Card(
                 child: Padding(
-                  padding:
-                      const EdgeInsets.all(18),
+                  padding: const EdgeInsets.all(18),
                   child: Column(
                     children: [
                       ListTile(
-                        leading: const Icon(
-                          Icons.my_location,
-                        ),
-                        title: const Text(
-                          'Origen',
-                        ),
-                        subtitle: Text(
-                          ride.originAddress,
-                        ),
+                        leading: const Icon(Icons.my_location),
+                        title: const Text('Origen'),
+                        subtitle: Text(ride.originAddress),
                       ),
 
                       const Divider(),
 
                       ListTile(
-                        leading: const Icon(
-                          Icons.location_on,
-                        ),
-                        title: const Text(
-                          'Destino',
-                        ),
-                        subtitle: Text(
-                          ride.destinationAddress,
-                        ),
+                        leading: const Icon(Icons.location_on),
+                        title: const Text('Destino'),
+                        subtitle: Text(ride.destinationAddress),
                       ),
                     ],
                   ),
@@ -732,10 +799,7 @@ class _RideSearchingScreenState
 
                 const Text(
                   'Conductores interesados',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 8),
@@ -743,8 +807,7 @@ class _RideSearchingScreenState
                 if (_offers.isEmpty)
                   Card(
                     child: Padding(
-                      padding:
-                          const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(20),
                       child: Column(
                         children: [
                           if (_loadingOffers) ...[
@@ -754,8 +817,7 @@ class _RideSearchingScreenState
                           const Text(
                             'Esperando propuestas de '
                             'conductores cercanos...',
-                            textAlign:
-                                TextAlign.center,
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
@@ -765,21 +827,15 @@ class _RideSearchingScreenState
                   for (final offer in _offers) ...[
                     Card(
                       child: Padding(
-                        padding:
-                            const EdgeInsets.all(18),
+                        padding: const EdgeInsets.all(18),
                         child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.stretch,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Row(
                               children: [
-                                _buildDriverAvatar(
-                                  offer,
-                                ),
+                                _buildDriverAvatar(offer),
 
-                                const SizedBox(
-                                  width: 14,
-                                ),
+                                const SizedBox(width: 14),
 
                                 Expanded(
                                   child: Column(
@@ -788,41 +844,30 @@ class _RideSearchingScreenState
                                     children: [
                                       Text(
                                         offer.driverDisplayName,
-                                        style:
-                                            const TextStyle(
+                                        style: const TextStyle(
                                           fontSize: 19,
-                                          fontWeight:
-                                              FontWeight.bold,
+                                          fontWeight: FontWeight.bold,
                                         ),
                                       ),
 
-                                      const SizedBox(
-                                        height: 5,
-                                      ),
+                                      const SizedBox(height: 5),
 
                                       Row(
                                         children: [
-                                          const Icon(
-                                            Icons.star,
-                                            size: 18,
-                                          ),
-                                          const SizedBox(
-                                            width: 4,
-                                          ),
+                                          const Icon(Icons.star, size: 18),
+                                          const SizedBox(width: 4),
                                           Expanded(
                                             child: Text(
                                               offer.ratingCount > 0
                                                   ? '${offer.ratingAverage.toStringAsFixed(1)} '
-                                                      '(${offer.ratingCount})'
+                                                        '(${offer.ratingCount})'
                                                   : 'Conductor nuevo',
                                             ),
                                           ),
                                         ],
                                       ),
 
-                                      const SizedBox(
-                                        height: 5,
-                                      ),
+                                      const SizedBox(height: 5),
 
                                       Text(
                                         'A ${_formatDriverDistance(offer.distanceToOriginMeters)} '
@@ -840,67 +885,49 @@ class _RideSearchingScreenState
                               offer.hasDifferentProposedFare
                                   ? 'Contraoferta del conductor'
                                   : 'Acepta tu precio',
-                              textAlign:
-                                  TextAlign.center,
+                              textAlign: TextAlign.center,
                             ),
 
                             const SizedBox(height: 6),
 
                             Text(
                               'S/ ${offer.proposedFare}',
-                              textAlign:
-                                  TextAlign.center,
-                              style:
-                                  const TextStyle(
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
                                 fontSize: 30,
-                                fontWeight:
-                                    FontWeight.bold,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
 
                             if (offer.hasDifferentProposedFare) ...[
-                              const SizedBox(
-                                height: 4,
-                              ),
+                              const SizedBox(height: 4),
                               Text(
                                 'Tu oferta fue '
                                 'S/ ${offer.passengerOfferFare}',
-                                textAlign:
-                                    TextAlign.center,
-                                style:
-                                    const TextStyle(
-                                  fontSize: 13,
-                                ),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontSize: 13),
                               ),
                             ],
 
                             const SizedBox(height: 16),
 
                             FilledButton(
-                              onPressed:
-                                  _selectingOfferId != null
-                                      ? null
-                                      : () =>
-                                          _selectOffer(offer),
+                              onPressed: _selectingOfferId != null || _canceling
+                                  ? null
+                                  : () => _selectOffer(offer),
                               child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(
+                                padding: const EdgeInsets.symmetric(
                                   vertical: 14,
                                 ),
-                                child:
-                                    _selectingOfferId ==
-                                            offer.offerId
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child:
-                                                CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Text(
-                                            'Elegir conductor',
-                                          ),
+                                child: _selectingOfferId == offer.offerId
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Elegir conductor'),
                               ),
                             ),
                           ],
@@ -910,89 +937,84 @@ class _RideSearchingScreenState
 
                     const SizedBox(height: 12),
                   ],
+
+                const SizedBox(height: 12),
+
+                OutlinedButton(
+                  key: const ValueKey('cancel-search-button'),
+                  onPressed: _canceling || _selectingOfferId != null
+                      ? null
+                      : _cancelSearch,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: _canceling
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Cancelar búsqueda'),
+                  ),
+                ),
               ],
 
-              if (ride.status ==
-                  'DRIVER_ARRIVED') ...[
+              if (ride.status == 'DRIVER_ARRIVED') ...[
                 const SizedBox(height: 32),
 
                 Card(
                   child: Padding(
-                    padding:
-                        const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        const Icon(
-                          Icons.pin,
-                          size: 48,
-                        ),
+                        const Icon(Icons.pin, size: 48),
 
-                        const SizedBox(
-                          height: 12,
-                        ),
+                        const SizedBox(height: 12),
 
                         const Text(
                           'Código para iniciar',
                           style: TextStyle(
                             fontSize: 22,
-                            fontWeight:
-                                FontWeight.bold,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
 
-                        const SizedBox(
-                          height: 16,
-                        ),
+                        const SizedBox(height: 16),
 
                         if (_loadingStartCode)
                           const CircularProgressIndicator()
-                        else if (_startCode !=
-                            null) ...[
+                        else if (_startCode != null) ...[
                           Text(
                             _startCode!.code,
-                            textAlign:
-                                TextAlign.center,
-                            style:
-                                const TextStyle(
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
                               fontSize: 48,
-                              fontWeight:
-                                  FontWeight.bold,
+                              fontWeight: FontWeight.bold,
                               letterSpacing: 14,
                             ),
                           ),
 
-                          const SizedBox(
-                            height: 12,
-                          ),
+                          const SizedBox(height: 12),
 
                           const Text(
                             'Muéstrale este código '
                             'al conductor para iniciar '
                             'el viaje.',
-                            textAlign:
-                                TextAlign.center,
+                            textAlign: TextAlign.center,
                           ),
 
-                          const SizedBox(
-                            height: 8,
-                          ),
+                          const SizedBox(height: 8),
 
                           Text(
                             'Intentos disponibles: '
                             '${_startCode!.remainingAttempts}',
-                            textAlign:
-                                TextAlign.center,
+                            textAlign: TextAlign.center,
                           ),
                         ] else
                           FilledButton(
                             onPressed: () {
-                              _loadStartCodeForRide(
-                                ride.id,
-                              );
+                              _loadStartCodeForRide(ride.id);
                             },
-                            child: const Text(
-                              'Obtener código',
-                            ),
+                            child: const Text('Obtener código'),
                           ),
                       ],
                     ),
@@ -1000,39 +1022,28 @@ class _RideSearchingScreenState
                 ),
               ],
 
-              if (ride.status ==
-                  'IN_PROGRESS') ...[
+              if (ride.status == 'IN_PROGRESS') ...[
                 const SizedBox(height: 32),
 
                 const Card(
                   child: Padding(
-                    padding:
-                        EdgeInsets.all(24),
+                    padding: EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        Icon(
-                          Icons.route,
-                          size: 54,
-                        ),
-                        SizedBox(
-                          height: 12,
-                        ),
+                        Icon(Icons.route, size: 54),
+                        SizedBox(height: 12),
                         Text(
                           'Viaje iniciado',
                           style: TextStyle(
                             fontSize: 22,
-                            fontWeight:
-                                FontWeight.bold,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        SizedBox(
-                          height: 8,
-                        ),
+                        SizedBox(height: 8),
                         Text(
                           'Tu TukiTuki está en camino '
                           'al destino.',
-                          textAlign:
-                              TextAlign.center,
+                          textAlign: TextAlign.center,
                         ),
                       ],
                     ),
@@ -1040,27 +1051,21 @@ class _RideSearchingScreenState
                 ),
               ],
 
-              if (ride.status ==
-                  'CANCELLED') ...[
+              if (ride.status == 'CANCELLED') ...[
                 const SizedBox(height: 32),
 
                 const Card(
                   child: Padding(
-                    padding:
-                        EdgeInsets.all(24),
+                    padding: EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        Icon(
-                          Icons.cancel,
-                          size: 54,
-                        ),
+                        Icon(Icons.cancel, size: 54),
                         SizedBox(height: 12),
                         Text(
                           'Viaje cancelado',
                           style: TextStyle(
                             fontSize: 22,
-                            fontWeight:
-                                FontWeight.bold,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
@@ -1069,30 +1074,23 @@ class _RideSearchingScreenState
                 ),
               ],
 
-              if (ride.status ==
-                  'EXPIRED') ...[
+              if (ride.status == 'EXPIRED') ...[
                 const SizedBox(height: 32),
 
                 const Card(
                   child: Padding(
-                    padding:
-                        EdgeInsets.all(24),
+                    padding: EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        Icon(
-                          Icons.timer_off,
-                          size: 54,
-                        ),
+                        Icon(Icons.timer_off, size: 54),
                         SizedBox(height: 12),
                         Text(
                           'No encontramos conductor',
                           style: TextStyle(
                             fontSize: 22,
-                            fontWeight:
-                                FontWeight.bold,
+                            fontWeight: FontWeight.bold,
                           ),
-                          textAlign:
-                              TextAlign.center,
+                          textAlign: TextAlign.center,
                         ),
                       ],
                     ),
@@ -1103,10 +1101,7 @@ class _RideSearchingScreenState
               if (_error != null) ...[
                 const SizedBox(height: 16),
 
-                Text(
-                  _error!,
-                  textAlign: TextAlign.center,
-                ),
+                Text(_error!, textAlign: TextAlign.center),
               ],
             ],
           ),

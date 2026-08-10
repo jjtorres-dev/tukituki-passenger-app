@@ -8,11 +8,8 @@ import '../domain/passenger_ride_offer.dart';
 import '../domain/passenger_ride_start_code.dart';
 import '../domain/ride_receipt.dart';
 
-final rideRepositoryProvider =
-    Provider<RideRepository>((ref) {
-  return RideRepository(
-    ref.watch(dioProvider),
-  );
+final rideRepositoryProvider = Provider<RideRepository>((ref) {
+  return RideRepository(ref.watch(dioProvider));
 });
 
 class RideRepository {
@@ -24,8 +21,7 @@ class RideRepository {
     required String fareQuoteId,
     required String passengerOfferFare,
   }) async {
-    final response =
-        await _dio.post<Map<String, dynamic>>(
+    final response = await _dio.post<Map<String, dynamic>>(
       'passenger/rides',
       data: {
         'fareQuoteId': fareQuoteId,
@@ -37,9 +33,7 @@ class RideRepository {
     final data = response.data;
 
     if (data == null) {
-      throw Exception(
-        'El backend devolvió una respuesta vacía.',
-      );
+      throw Exception('El backend devolvió una respuesta vacía.');
     }
 
     return PassengerRide.fromJson(data);
@@ -47,8 +41,7 @@ class RideRepository {
 
   Future<PassengerRide?> getActiveRide() async {
     try {
-      final response =
-          await _dio.get<Map<String, dynamic>>(
+      final response = await _dio.get<Map<String, dynamic>>(
         'passenger/rides/active',
       );
 
@@ -68,35 +61,26 @@ class RideRepository {
     }
   }
 
-  Future<PassengerRide> getRide(
-    String rideId,
-  ) async {
-    final response =
-        await _dio.get<Map<String, dynamic>>(
+  Future<PassengerRide> getRide(String rideId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
       'passenger/rides/$rideId',
     );
 
     final data = response.data;
 
     if (data == null) {
-      throw Exception(
-        'El viaje no pudo ser consultado.',
-      );
+      throw Exception('El viaje no pudo ser consultado.');
     }
 
     return PassengerRide.fromJson(data);
   }
 
-  Future<List<PassengerRideOffer>> getRideOffers(
-    String rideId,
-  ) async {
-    final response =
-        await _dio.get<List<dynamic>>(
+  Future<List<PassengerRideOffer>> getRideOffers(String rideId) async {
+    final response = await _dio.get<List<dynamic>>(
       'passenger/rides/$rideId/offers',
     );
 
-    final data =
-        response.data ?? const <dynamic>[];
+    final data = response.data ?? const <dynamic>[];
 
     final offers = <PassengerRideOffer>[];
 
@@ -117,8 +101,7 @@ class RideRepository {
           Map<String, dynamic>.from(item),
         );
 
-        if (offer.offerId.trim().isEmpty ||
-            offer.rideId.trim().isEmpty) {
+        if (offer.offerId.trim().isEmpty || offer.rideId.trim().isEmpty) {
           throw const FormatException(
             'La propuesta no tiene offerId o rideId.',
           );
@@ -127,9 +110,7 @@ class RideRepository {
         offers.add(offer);
       } catch (error) {
         if (kDebugMode) {
-          debugPrint(
-            'Ignorando propuesta inválida: $error',
-          );
+          debugPrint('Ignorando propuesta inválida: $error');
         }
       }
     }
@@ -141,55 +122,57 @@ class RideRepository {
     required String rideId,
     required String offerId,
   }) async {
-    final response =
-        await _dio.post<Map<String, dynamic>>(
+    final response = await _dio.post<Map<String, dynamic>>(
       'passenger/rides/$rideId/offers/$offerId/select',
     );
 
     final data = response.data;
 
     if (data == null) {
-      throw Exception(
-        'El backend devolvió una respuesta vacía.',
-      );
+      throw Exception('El backend devolvió una respuesta vacía.');
     }
 
     return PassengerRide.fromJson(data);
   }
 
-  Future<PassengerRideStartCode> getStartCode(
-    String rideId,
-  ) async {
-    final response =
-        await _dio.get<Map<String, dynamic>>(
+  Future<PassengerRide> cancelRide({required String rideId}) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      'passenger/rides/$rideId/cancel',
+      data: {'reason': 'Ya no necesito el viaje'},
+    );
+
+    final data = response.data;
+
+    if (data == null) {
+      throw Exception('El backend devolvió una respuesta vacía.');
+    }
+
+    return PassengerRide.fromJson(data);
+  }
+
+  Future<PassengerRideStartCode> getStartCode(String rideId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
       'passenger/rides/$rideId/start-code',
     );
 
     final data = response.data;
 
     if (data == null) {
-      throw Exception(
-        'No se pudo obtener el código de inicio.',
-      );
+      throw Exception('No se pudo obtener el código de inicio.');
     }
 
     return PassengerRideStartCode.fromJson(data);
   }
 
-  Future<RideReceipt> getReceipt(
-    String rideId,
-  ) async {
-    final response =
-        await _dio.get<Map<String, dynamic>>(
+  Future<RideReceipt> getReceipt(String rideId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
       'passenger/rides/$rideId/receipt',
     );
 
     final data = response.data;
 
     if (data == null) {
-      throw Exception(
-        'No se pudo obtener el recibo.',
-      );
+      throw Exception('No se pudo obtener el recibo.');
     }
 
     return RideReceipt.fromJson(data);
@@ -205,11 +188,9 @@ class RideRepository {
       'passenger/rides/$rideId/rating',
       data: {
         'score': score,
-        if (comment != null &&
-            comment.trim().isNotEmpty)
+        if (comment != null && comment.trim().isNotEmpty)
           'comment': comment.trim(),
-        if (tags.isNotEmpty)
-          'tags': tags,
+        if (tags.isNotEmpty) 'tags': tags,
       },
     );
   }
