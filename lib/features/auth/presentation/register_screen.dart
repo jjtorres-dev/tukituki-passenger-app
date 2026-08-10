@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/auth_repository.dart';
-import 'otp_screen.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -62,6 +61,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     final phoneE164 = '+51$phone';
     final password = _passwordController.text;
+    var accountCreated = false;
 
     try {
       final repository = ref.read(authRepositoryProvider);
@@ -70,21 +70,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         phoneE164: phoneE164,
         password: password,
       );
+      accountCreated = true;
 
-      final debugOtp = await repository.requestOtp(phoneE164: phoneE164);
+      await repository.login(phoneE164: phoneE164, password: password);
 
       if (!mounted) {
         return;
       }
 
-      context.push(
-        '/otp',
-        extra: OtpArguments(
-          phoneE164: phoneE164,
-          password: password,
-          debugOtp: debugOtp,
-        ),
-      );
+      context.go('/splash');
     } on DioException catch (error) {
       if (!mounted) {
         return;
@@ -92,16 +86,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
       String message = 'No se pudo crear la cuenta.';
 
-      if (error.response?.statusCode == 409) {
+      if (accountCreated) {
+        message =
+            'La cuenta fue creada, pero no se pudo iniciar sesión. '
+            'Intenta iniciar sesión desde Login.';
+      } else if (error.response?.statusCode == 409) {
         message =
             'Este número ya está registrado. '
             'Intenta iniciar sesión.';
       } else if (error.response?.statusCode == 400) {
         message = 'Revisa los datos ingresados.';
       } else if (error.response?.statusCode == 429) {
-        message =
-            'Espera un momento antes de solicitar '
-            'otro código.';
+        message = 'Espera un momento antes de intentar nuevamente.';
       } else if (error.response == null) {
         message = 'No se pudo conectar con TukiTuki.';
       }
@@ -115,7 +111,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ocurrió un error inesperado.')),
+        SnackBar(
+          content: Text(
+            accountCreated
+                ? 'La cuenta fue creada, pero no se pudo iniciar sesión. '
+                      'Intenta iniciar sesión desde Login.'
+                : 'Ocurrió un error inesperado.',
+          ),
+        ),
       );
     } finally {
       if (mounted) {

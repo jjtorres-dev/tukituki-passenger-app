@@ -72,7 +72,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (error.response?.statusCode == 401) {
         message = 'Teléfono o contraseña incorrectos.';
       } else if (error.response?.statusCode == 403) {
-        message = 'Tu cuenta todavía no está verificada o habilitada.';
+        message = 'Tu cuenta no está habilitada para iniciar sesión.';
       } else if (error.response == null) {
         message = 'No se pudo conectar con TukiTuki.';
       }

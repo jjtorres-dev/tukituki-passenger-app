@@ -116,24 +116,16 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
       final isPassenger = user.roles.contains('PASSENGER');
 
-      final isValidPassenger =
-          user.status == 'ACTIVE' && user.isPhoneVerified && isPassenger;
+      final isValidPassenger = user.status == 'ACTIVE' && isPassenger;
 
       if (!isValidPassenger) {
         await _clearSessionAndGoToLogin(authRepository);
         return;
       }
 
-      final profile = await ref
-          .read(passengerProfileRepositoryProvider)
-          .getMyProfile();
+      await ref.read(passengerProfileRepositoryProvider).getMyProfile();
 
       if (!mounted) {
-        return;
-      }
-
-      if (profile == null) {
-        context.go('/complete-profile');
         return;
       }
 
