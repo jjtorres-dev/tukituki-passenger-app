@@ -1634,6 +1634,9 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
       case 'DRIVER_ARRIVED':
         return 150;
 
+      case 'IN_PROGRESS':
+        return 340;
+
       default:
         return 200;
     }
@@ -1661,6 +1664,12 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
         title = 'Tu conductor llegó';
         subtitle = 'Muéstrale tu código para iniciar el viaje.';
         icon = Icons.location_on;
+        break;
+
+      case 'IN_PROGRESS':
+        title = 'Viaje en curso';
+        subtitle = 'TukiTuki está en camino a tu destino.';
+        icon = Icons.route;
         break;
 
       default:
@@ -2062,6 +2071,188 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
     );
   }
 
+  /*
+   * Indicador puramente de ESTADO, no de distancia.
+   *
+   * IN_PROGRESS garantiza que el recojo ya ocurrió
+   * (el Driver validó el PIN) y que el destino todavía
+   * está pendiente. No representa kilómetros recorridos
+   * ni porcentaje de avance real, porque Passenger no
+   * dispone de esa métrica.
+   */
+  Widget _buildTripProgressIndicator() {
+    return Container(
+      key: const ValueKey('trip-progress-indicator'),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _softBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: const BoxDecoration(
+              color: _green,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.check, color: Colors.white, size: 16),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'RECOJO',
+            style: TextStyle(
+              color: _primaryText,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+            ),
+          ),
+          Expanded(
+            child: Container(
+              height: 3,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: _green,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(color: _destinationColor, width: 2.5),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'DESTINO',
+            style: TextStyle(
+              color: _secondaryText,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDestinationSummaryCard(PassengerRide ride) {
+    return Container(
+      key: const ValueKey('in-progress-destination-card'),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _softBorder),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.location_on, color: _destinationColor, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Destino',
+                  style: TextStyle(
+                    color: _secondaryText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _destinationLabel(ride),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _primaryText,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInProgressScaffold(PassengerRide ride) {
+    final origin = _ridePoint(ride.originLatitude, ride.originLongitude);
+    final destination = _ridePoint(
+      ride.destinationLatitude,
+      ride.destinationLongitude,
+    );
+    final driverPoint = _driverPoint(ride.driverLocation);
+    final driver = ride.driver;
+
+    return Scaffold(
+      backgroundColor: _cream,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildSearchingHeader(),
+            if (origin != null || destination != null || driverPoint != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: SizedBox(
+                    height: _trackingMapHeight(ride.status),
+                    child: _RideRouteMap(
+                      origin: origin,
+                      destination: destination,
+                      driverLocation: driverPoint,
+                    ),
+                  ),
+                ),
+              ),
+            Expanded(
+              child: SingleChildScrollView(
+                key: const ValueKey('in-progress-scroll'),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildTrackingStatusCard(ride),
+                        const SizedBox(height: 16),
+                        _buildTripProgressIndicator(),
+                        if (driver != null) ...[
+                          const SizedBox(height: 16),
+                          _buildAssignedDriverCard(driver),
+                        ],
+                        const SizedBox(height: 16),
+                        _buildAgreedFareCard(ride),
+                        const SizedBox(height: 16),
+                        _buildDestinationSummaryCard(ride),
+                        const SizedBox(height: 8),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildDriverTrackingScaffold(PassengerRide ride) {
     final origin = _ridePoint(ride.originLatitude, ride.originLongitude);
     final destination = _ridePoint(
@@ -2166,6 +2357,10 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
         ride.status == 'DRIVER_ARRIVING' ||
         ride.status == 'DRIVER_ARRIVED') {
       return _buildDriverTrackingScaffold(ride);
+    }
+
+    if (ride.status == 'IN_PROGRESS') {
+      return _buildInProgressScaffold(ride);
     }
 
     return Scaffold(
@@ -2421,35 +2616,6 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('Cancelar búsqueda'),
-                  ),
-                ),
-              ],
-
-              if (ride.status == 'IN_PROGRESS') ...[
-                const SizedBox(height: 32),
-
-                const Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        Icon(Icons.route, size: 54),
-                        SizedBox(height: 12),
-                        Text(
-                          'Viaje iniciado',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'TukiTuki está en camino '
-                          'al destino.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ],
