@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../data/ride_repository.dart';
+import '../domain/assigned_driver.dart';
+import '../domain/driver_location.dart';
 import '../domain/fare_amount.dart';
 import '../domain/passenger_ride.dart';
 import '../domain/passenger_ride_offer.dart';
@@ -55,6 +57,9 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
 
   String? _selectingOfferId;
   String? _error;
+  String? _startCodeError;
+
+  bool _assignedAcknowledged = false;
 
   @override
   void initState() {
@@ -600,6 +605,7 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
 
     setState(() {
       _loadingStartCode = true;
+      _startCodeError = null;
     });
 
     try {
@@ -611,6 +617,7 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
 
       setState(() {
         _startCode = code;
+        _startCodeError = null;
       });
     } catch (error) {
       debugPrint('Error obteniendo código de inicio: $error');
@@ -619,10 +626,14 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
         return;
       }
 
+      const message = 'No se pudo obtener el código de inicio.';
+
+      setState(() {
+        _startCodeError = message;
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo obtener el código de inicio.'),
-        ),
+        const SnackBar(content: Text(message)),
       );
     } finally {
       if (mounted && !_navigatingAway) {
@@ -748,6 +759,14 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
     }
 
     return LatLng(latitude, longitude);
+  }
+
+  LatLng? _driverPoint(DriverLocation? location) {
+    if (location == null) {
+      return null;
+    }
+
+    return _ridePoint(location.latitude, location.longitude);
   }
 
   String _formatFare(String value) {
@@ -1607,6 +1626,513 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
     );
   }
 
+  double _trackingMapHeight(String status) {
+    switch (status) {
+      case 'DRIVER_ARRIVING':
+        return 300;
+
+      case 'DRIVER_ARRIVED':
+        return 150;
+
+      default:
+        return 200;
+    }
+  }
+
+  Widget _buildTrackingStatusCard(PassengerRide ride) {
+    late final String title;
+    String? subtitle;
+    late final IconData icon;
+
+    switch (ride.status) {
+      case 'DRIVER_ASSIGNED':
+        title = '¡Conductor encontrado!';
+        subtitle = 'Tu mototaxi está en camino';
+        icon = Icons.two_wheeler;
+        break;
+
+      case 'DRIVER_ARRIVING':
+        title = 'Tu conductor está en camino';
+        subtitle = 'Sigue su ubicación en el mapa.';
+        icon = Icons.two_wheeler;
+        break;
+
+      case 'DRIVER_ARRIVED':
+        title = 'Tu conductor llegó';
+        subtitle = 'Muéstrale tu código para iniciar el viaje.';
+        icon = Icons.location_on;
+        break;
+
+      default:
+        title = _statusText(ride.status);
+        icon = _statusIcon(ride.status);
+    }
+
+    return Container(
+      key: const ValueKey('driver-tracking-status-card'),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _softBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: const BoxDecoration(
+              color: _ctaYellow,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: _darkGreen, size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  key: const ValueKey('driver-tracking-status-title'),
+                  style: const TextStyle(
+                    color: _primaryText,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: _secondaryText,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssignedDriverAvatar(AssignedDriver driver) {
+    final photoUrl = driver.photoUrl?.trim();
+    final photoUri = photoUrl == null || photoUrl.isEmpty
+        ? null
+        : Uri.tryParse(photoUrl);
+
+    Widget fallback() {
+      final firstName = driver.firstName.trim();
+      final initial = firstName.isEmpty ? null : firstName[0].toUpperCase();
+
+      return Container(
+        width: 56,
+        height: 56,
+        alignment: Alignment.center,
+        decoration: const BoxDecoration(
+          color: Color(0xFFE7F1E8),
+          shape: BoxShape.circle,
+        ),
+        child: initial == null
+            ? const Icon(Icons.person_outline, color: _green, size: 28)
+            : Text(
+                initial,
+                style: const TextStyle(
+                  color: _darkGreen,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+      );
+    }
+
+    final hasValidPhoto =
+        photoUri != null &&
+        (photoUri.scheme == 'http' || photoUri.scheme == 'https') &&
+        photoUri.host.isNotEmpty;
+
+    if (!hasValidPhoto) {
+      return fallback();
+    }
+
+    return ClipOval(
+      child: Image.network(
+        photoUrl!,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => fallback(),
+      ),
+    );
+  }
+
+  Widget _buildAssignedDriverCard(AssignedDriver driver) {
+    final vehicle = driver.vehicle;
+    final firstName = driver.firstName.trim();
+    final plate = vehicle?.plate.trim() ?? '';
+    final vehicleDescription = vehicle == null
+        ? ''
+        : [
+            vehicle.brand.trim(),
+            vehicle.model.trim(),
+            vehicle.color.trim(),
+          ].where((value) => value.isNotEmpty).join(' · ');
+
+    return Container(
+      key: const ValueKey('assigned-driver-card'),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _softBorder),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _buildAssignedDriverAvatar(driver),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (firstName.isNotEmpty)
+                  Text(
+                    firstName,
+                    key: const ValueKey('assigned-driver-name'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _primaryText,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                if (driver.hasRating || plate.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 6,
+                    children: [
+                      if (driver.hasRating)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.star_rounded,
+                              color: Color(0xFFE8A600),
+                              size: 18,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              double.tryParse(
+                                    driver.ratingAverage,
+                                  )?.toStringAsFixed(1) ??
+                                  driver.ratingAverage,
+                              key: const ValueKey('assigned-driver-rating'),
+                              style: const TextStyle(
+                                color: _primaryText,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      if (plate.isNotEmpty)
+                        Text(
+                          plate,
+                          key: const ValueKey('assigned-driver-plate'),
+                          style: const TextStyle(
+                            color: _secondaryText,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+                if (vehicleDescription.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    vehicleDescription,
+                    key: const ValueKey('assigned-driver-vehicle'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _secondaryText,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAgreedFareCard(PassengerRide ride) {
+    final fare = ride.agreedFare ?? ride.passengerOfferFare;
+
+    return Container(
+      key: const ValueKey('agreed-fare-card'),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: _darkGreen,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: _darkGreen.withValues(alpha: 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.handshake_outlined,
+              color: _ctaYellow,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Text(
+              'PRECIO ACORDADO',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ),
+          Text(
+            'S/ ${_formatFare(fare)}',
+            key: const ValueKey('agreed-fare-value'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFollowRideButton() {
+    return SizedBox(
+      key: const ValueKey('follow-ride-button'),
+      height: 52,
+      child: FilledButton(
+        onPressed: () {
+          setState(() {
+            _assignedAcknowledged = true;
+          });
+        },
+        style: FilledButton.styleFrom(
+          backgroundColor: _ctaYellow,
+          foregroundColor: _darkGreen,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        child: const Text('Seguir mi viaje'),
+      ),
+    );
+  }
+
+  Widget _buildPinCard(PassengerRide ride) {
+    return Container(
+      key: const ValueKey('start-code-card'),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _softBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'CÓDIGO PARA INICIAR EL VIAJE',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _secondaryText,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_loadingStartCode)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: _green,
+                  ),
+                ),
+              ),
+            )
+          else if (_startCode != null) ...[
+            Text(
+              _startCode!.code,
+              key: const ValueKey('start-code-value'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _darkGreen,
+                fontSize: 44,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 12,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Muestra este código al conductor para confirmar que eres tú '
+              'e iniciar el viaje.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _secondaryText,
+                fontSize: 13.5,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '${_startCode!.remainingAttempts} intentos disponibles',
+              key: const ValueKey('start-code-attempts'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _primaryText,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ] else if (_startCodeError != null) ...[
+            Text(
+              _startCodeError!,
+              key: const ValueKey('start-code-error'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _destinationColor,
+                fontSize: 13.5,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              key: const ValueKey('start-code-retry'),
+              onPressed: () => _loadStartCodeForRide(ride.id),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _green,
+                side: const BorderSide(color: _border),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(13),
+                ),
+              ),
+              child: const Text('Reintentar'),
+            ),
+          ] else
+            const SizedBox.shrink(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriverTrackingScaffold(PassengerRide ride) {
+    final origin = _ridePoint(ride.originLatitude, ride.originLongitude);
+    final destination = _ridePoint(
+      ride.destinationLatitude,
+      ride.destinationLongitude,
+    );
+    final driverPoint = _driverPoint(ride.driverLocation);
+    final driver = ride.driver;
+
+    return Scaffold(
+      backgroundColor: _cream,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildSearchingHeader(),
+            if (origin != null || destination != null || driverPoint != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: SizedBox(
+                    height: _trackingMapHeight(ride.status),
+                    child: _RideRouteMap(
+                      origin: origin,
+                      destination: destination,
+                      driverLocation: driverPoint,
+                    ),
+                  ),
+                ),
+              ),
+            Expanded(
+              child: SingleChildScrollView(
+                key: const ValueKey('driver-tracking-scroll'),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildTrackingStatusCard(ride),
+                        if (driver != null) ...[
+                          const SizedBox(height: 16),
+                          _buildAssignedDriverCard(driver),
+                        ],
+                        const SizedBox(height: 16),
+                        _buildAgreedFareCard(ride),
+                        const SizedBox(height: 16),
+                        _buildRouteCard(ride),
+                        if (ride.status == 'DRIVER_ARRIVED') ...[
+                          const SizedBox(height: 16),
+                          _buildPinCard(ride),
+                        ],
+                        if (ride.status == 'DRIVER_ASSIGNED' &&
+                            !_assignedAcknowledged) ...[
+                          const SizedBox(height: 24),
+                          _buildFollowRideButton(),
+                        ],
+                        const SizedBox(height: 8),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -1634,6 +2160,12 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
 
     if (ride.status == 'SEARCHING_DRIVER') {
       return _buildSearchingScaffold(ride);
+    }
+
+    if (ride.status == 'DRIVER_ASSIGNED' ||
+        ride.status == 'DRIVER_ARRIVING' ||
+        ride.status == 'DRIVER_ARRIVED') {
+      return _buildDriverTrackingScaffold(ride);
     }
 
     return Scaffold(
@@ -1893,70 +2425,6 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
                 ),
               ],
 
-              if (ride.status == 'DRIVER_ARRIVED') ...[
-                const SizedBox(height: 32),
-
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        const Icon(Icons.pin, size: 48),
-
-                        const SizedBox(height: 12),
-
-                        const Text(
-                          'Código para iniciar',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-
-                        const SizedBox(height: 16),
-
-                        if (_loadingStartCode)
-                          const CircularProgressIndicator()
-                        else if (_startCode != null) ...[
-                          Text(
-                            _startCode!.code,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 48,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 14,
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-
-                          const Text(
-                            'Muéstrale este código '
-                            'al conductor para iniciar '
-                            'el viaje.',
-                            textAlign: TextAlign.center,
-                          ),
-
-                          const SizedBox(height: 8),
-
-                          Text(
-                            'Intentos disponibles: '
-                            '${_startCode!.remainingAttempts}',
-                            textAlign: TextAlign.center,
-                          ),
-                        ] else
-                          FilledButton(
-                            onPressed: () {
-                              _loadStartCodeForRide(ride.id);
-                            },
-                            child: const Text('Obtener código'),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-
               if (ride.status == 'IN_PROGRESS') ...[
                 const SizedBox(height: 32),
 
@@ -2047,10 +2515,23 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
 }
 
 class _RideRouteMap extends StatefulWidget {
-  const _RideRouteMap({required this.origin, required this.destination});
+  const _RideRouteMap({
+    required this.origin,
+    required this.destination,
+    this.driverLocation,
+  });
 
   final LatLng? origin;
   final LatLng? destination;
+
+  /*
+   * La ubicación del Driver NO participa del ajuste
+   * de cámara (ver _scheduleCameraUpdate): solo agrega
+   * un marker que se actualiza con cada rebuild del
+   * polling, evitando saltos de cámara cada pocos
+   * segundos.
+   */
+  final LatLng? driverLocation;
 
   @override
   State<_RideRouteMap> createState() => _RideRouteMapState();
@@ -2095,7 +2576,7 @@ class _RideRouteMapState extends State<_RideRouteMap> {
       );
     }
 
-    return origin ?? destination!;
+    return origin ?? destination ?? widget.driverLocation!;
   }
 
   bool _areDistinct(LatLng first, LatLng second) {
@@ -2178,6 +2659,16 @@ class _RideRouteMapState extends State<_RideRouteMap> {
             BitmapDescriptor.hueOrange,
           ),
           infoWindow: const InfoWindow(title: 'Destino'),
+        ),
+      if (widget.driverLocation != null)
+        Marker(
+          markerId: const MarkerId('ride-driver'),
+          position: widget.driverLocation!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueYellow,
+          ),
+          infoWindow: const InfoWindow(title: 'Conductor'),
+          zIndexInt: 2,
         ),
     };
   }

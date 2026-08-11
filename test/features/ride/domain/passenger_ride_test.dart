@@ -72,6 +72,140 @@ void main() {
     expect(ride.distanceMeters, 2100);
     expect(ride.estimatedDurationSeconds, 360);
   });
+
+  test('parsea driver, vehicle y driverLocation reales tras la asignación', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: {
+          'driver': {
+            'profileId': 'driver-1',
+            'firstName': 'Carlos',
+            'photoUrl': 'https://cdn.tukituki.pe/carlos.jpg',
+            'ratingAverage': '4.92',
+            'ratingCount': 128,
+            'vehicle': {
+              'plate': '1234-AB',
+              'brand': 'Bajaj',
+              'model': 'RE 4S',
+              'color': 'Rojo',
+              'vehicleType': 'MOTOTAXI',
+            },
+          },
+          'driverLocation': {
+            'latitude': -6.4879,
+            'longitude': -76.3601,
+            'heading': 90,
+            'speed': 7.5,
+            'accuracy': 8,
+            'recordedAt': '2026-08-10T12:05:00.000Z',
+          },
+          'driverAssignedAt': '2026-08-10T12:01:00.000Z',
+          'driverArrivingAt': '2026-08-10T12:02:00.000Z',
+          'driverArrivedAt': null,
+          'arrivalDistanceMeters': null,
+        },
+      ),
+    );
+
+    expect(ride.driver, isNotNull);
+    expect(ride.driver!.profileId, 'driver-1');
+    expect(ride.driver!.firstName, 'Carlos');
+    expect(ride.driver!.photoUrl, 'https://cdn.tukituki.pe/carlos.jpg');
+    expect(ride.driver!.ratingAverage, '4.92');
+    expect(ride.driver!.ratingCount, 128);
+    expect(ride.driver!.hasRating, isTrue);
+
+    expect(ride.driver!.vehicle, isNotNull);
+    expect(ride.driver!.vehicle!.plate, '1234-AB');
+    expect(ride.driver!.vehicle!.brand, 'Bajaj');
+    expect(ride.driver!.vehicle!.model, 'RE 4S');
+    expect(ride.driver!.vehicle!.color, 'Rojo');
+    expect(ride.driver!.vehicle!.vehicleType, 'MOTOTAXI');
+
+    expect(ride.driverLocation, isNotNull);
+    expect(ride.driverLocation!.latitude, -6.4879);
+    expect(ride.driverLocation!.longitude, -76.3601);
+    expect(ride.driverLocation!.heading, 90);
+    expect(ride.driverLocation!.speed, 7.5);
+    expect(ride.driverLocation!.accuracy, 8);
+    expect(
+      ride.driverLocation!.recordedAt,
+      DateTime.parse('2026-08-10T12:05:00.000Z'),
+    );
+
+    expect(
+      ride.driverAssignedAt,
+      DateTime.parse('2026-08-10T12:01:00.000Z'),
+    );
+    expect(
+      ride.driverArrivingAt,
+      DateTime.parse('2026-08-10T12:02:00.000Z'),
+    );
+    expect(ride.driverArrivedAt, isNull);
+    expect(ride.arrivalDistanceMeters, isNull);
+  });
+
+  test('driver ausente antes de la asignación no rompe el parsing', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+      ),
+    );
+
+    expect(ride.driver, isNull);
+    expect(ride.driverLocation, isNull);
+    expect(ride.driverAssignedAt, isNull);
+    expect(ride.driverArrivingAt, isNull);
+    expect(ride.driverArrivedAt, isNull);
+    expect(ride.arrivalDistanceMeters, isNull);
+  });
+
+  test('conductor sin historial respeta el rating real 0.00/0', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: {
+          'driver': {
+            'profileId': 'driver-2',
+            'firstName': 'Nuevo',
+            'photoUrl': null,
+            'ratingAverage': '0.00',
+            'ratingCount': 0,
+            'vehicle': {
+              'plate': '5678-CD',
+              'brand': 'Honda',
+              'model': 'CB1',
+              'color': 'Negro',
+              'vehicleType': 'MOTOTAXI',
+            },
+          },
+        },
+      ),
+    );
+
+    expect(ride.driver!.ratingAverage, '0.00');
+    expect(ride.driver!.ratingCount, 0);
+    expect(ride.driver!.hasRating, isFalse);
+    expect(ride.driver!.photoUrl, isNull);
+  });
+
+  test('driverLocation inválida no rompe el parsing', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: {
+          'driverLocation': {'latitude': 'no-numero', 'longitude': 200},
+        },
+      ),
+    );
+
+    expect(ride.driverLocation, isNull);
+  });
 }
 
 Map<String, dynamic> _rideJson({
@@ -79,6 +213,7 @@ Map<String, dynamic> _rideJson({
   required Object destination,
   num distanceMeters = 1500,
   num estimatedDurationSeconds = 600,
+  Map<String, dynamic> extra = const {},
 }) {
   return {
     'id': 'ride-1',
@@ -96,5 +231,6 @@ Map<String, dynamic> _rideJson({
     'destination': destination,
     'requestedAt': '2026-08-10T12:00:00.000Z',
     'searchExpiresAt': null,
+    ...extra,
   };
 }

@@ -1,3 +1,6 @@
+import 'assigned_driver.dart';
+import 'driver_location.dart';
+
 class PassengerRide {
   const PassengerRide({
     required this.id,
@@ -19,6 +22,12 @@ class PassengerRide {
     required this.destinationAddress,
     required this.requestedAt,
     required this.searchExpiresAt,
+    this.driver,
+    this.driverLocation,
+    this.driverAssignedAt,
+    this.driverArrivingAt,
+    this.driverArrivedAt,
+    this.arrivalDistanceMeters,
   });
 
   final String id;
@@ -46,6 +55,14 @@ class PassengerRide {
 
   final DateTime requestedAt;
   final DateTime? searchExpiresAt;
+
+  final AssignedDriver? driver;
+  final DriverLocation? driverLocation;
+
+  final DateTime? driverAssignedAt;
+  final DateTime? driverArrivingAt;
+  final DateTime? driverArrivedAt;
+  final String? arrivalDistanceMeters;
 
   factory PassengerRide.fromJson(Map<String, dynamic> json) {
     final originValue = json['origin'];
@@ -142,6 +159,24 @@ class PassengerRide {
       searchExpiresAt: searchExpiresAtValue != null
           ? DateTime.tryParse(searchExpiresAtValue)
           : null,
+
+      driver: AssignedDriver.tryParse(json['driver']),
+
+      driverLocation: DriverLocation.tryParse(json['driverLocation']),
+
+      driverAssignedAt: DateTime.tryParse(
+        json['driverAssignedAt']?.toString() ?? '',
+      ),
+
+      driverArrivingAt: DateTime.tryParse(
+        json['driverArrivingAt']?.toString() ?? '',
+      ),
+
+      driverArrivedAt: DateTime.tryParse(
+        json['driverArrivedAt']?.toString() ?? '',
+      ),
+
+      arrivalDistanceMeters: json['arrivalDistanceMeters']?.toString(),
     );
   }
 }

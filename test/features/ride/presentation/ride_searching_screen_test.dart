@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:passenger/features/ride/data/ride_repository.dart';
+import 'package:passenger/features/ride/domain/assigned_driver.dart';
+import 'package:passenger/features/ride/domain/driver_location.dart';
 import 'package:passenger/features/ride/domain/passenger_ride.dart';
 import 'package:passenger/features/ride/domain/passenger_ride_offer.dart';
+import 'package:passenger/features/ride/domain/passenger_ride_start_code.dart';
 import 'package:passenger/features/ride/presentation/ride_searching_screen.dart';
 
 void main() {
@@ -711,6 +715,322 @@ void main() {
     expect(router.routeInformationProvider.value.uri.path, '/home');
     expect(find.text('Buscando un conductor...'), findsNothing);
   });
+
+  group('DRIVER_ASSIGNED', () {
+    testWidgets('muestra conductor encontrado, driver real y agreedFare', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ASSIGNED',
+          agreedFare: '6.50',
+          driver: _assignedDriver(firstName: 'Julio'),
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('¡Conductor encontrado!'), findsOneWidget);
+      expect(find.text('Tu mototaxi está en camino'), findsOneWidget);
+      expect(find.text('Julio'), findsOneWidget);
+      expect(find.text('S/ 6.50'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('assigned-driver-plate')),
+        findsOneWidget,
+      );
+      expect(find.text('1234-AB'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('sin driver ni driverLocation no crashea y omite la ficha', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async =>
+            _ride(status: 'DRIVER_ASSIGNED', agreedFare: '7.00'),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('¡Conductor encontrado!'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('assigned-driver-card')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('foto ausente muestra inicial sin romper el layout', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ASSIGNED',
+          agreedFare: '7.00',
+          driver: _assignedDriver(firstName: 'Julio', photoUrl: null),
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('J'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'Seguir mi viaje solo oculta el CTA, no cambia ride.status',
+      (tester) async {
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async => _ride(
+            status: 'DRIVER_ASSIGNED',
+            agreedFare: '7.00',
+            driver: _assignedDriver(),
+          ),
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        final followButton = find.byKey(const ValueKey('follow-ride-button'));
+        expect(followButton, findsOneWidget);
+
+        await tester.tap(followButton);
+        await tester.pump();
+
+        expect(followButton, findsNothing);
+        expect(find.text('¡Conductor encontrado!'), findsOneWidget);
+        expect(repository.selectRequests, 0);
+        expect(repository.cancelRequests, 0);
+      },
+    );
+  });
+
+  group('DRIVER_ARRIVING', () {
+    testWidgets('muestra seguimiento real sin ETA ficticia', (tester) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ARRIVING',
+          agreedFare: '7.00',
+          driver: _assignedDriver(),
+          driverLocation: _driverLocation(),
+          originLatitude: -6.4877,
+          originLongitude: -76.3599,
+          destinationLatitude: -6.4812,
+          destinationLongitude: -76.3651,
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('Tu conductor está en camino'), findsOneWidget);
+      expect(find.text('Carlos'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Text &&
+              RegExp(
+                r'\bmin\b',
+                caseSensitive: false,
+              ).hasMatch(widget.data ?? ''),
+        ),
+        findsNothing,
+      );
+      expect(find.textContaining('ETA'), findsNothing);
+
+      final map = tester.widget<GoogleMap>(
+        find.byKey(const ValueKey('ride-search-google-map')),
+      );
+      expect(
+        map.markers.any((marker) => marker.markerId == const MarkerId('ride-driver')),
+        isTrue,
+      );
+    });
+
+    testWidgets('driverLocation null no agrega marker ni crashea', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ARRIVING',
+          agreedFare: '7.00',
+          driver: _assignedDriver(),
+          originLatitude: -6.4877,
+          originLongitude: -76.3599,
+          destinationLatitude: -6.4812,
+          destinationLongitude: -76.3651,
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      final map = tester.widget<GoogleMap>(
+        find.byKey(const ValueKey('ride-search-google-map')),
+      );
+      expect(
+        map.markers.any((marker) => marker.markerId == const MarkerId('ride-driver')),
+        isFalse,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('DRIVER_ARRIVED', () {
+    testWidgets('obtiene y muestra el PIN real con intentos reales', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ARRIVED',
+          agreedFare: '7.00',
+          driver: _assignedDriver(),
+        ),
+        onGetRideOffers: (_) async => const [],
+        onGetStartCode: (_) async => _startCode(
+          code: '4821',
+          remainingAttempts: 4,
+        ),
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+      await _flushAsync(tester);
+
+      expect(find.text('Tu conductor llegó'), findsOneWidget);
+      expect(find.text('4821'), findsOneWidget);
+      expect(find.text('4 intentos disponibles'), findsOneWidget);
+      expect(repository.startCodeRequests, 1);
+    });
+
+    testWidgets('error al obtener el PIN muestra estado seguro sin PIN falso', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async =>
+            _ride(status: 'DRIVER_ARRIVED', agreedFare: '7.00'),
+        onGetRideOffers: (_) async => const [],
+        onGetStartCode: (_) async => throw _dioStartCodeError(),
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+      await _flushAsync(tester);
+
+      expect(
+        find.byKey(const ValueKey('start-code-error')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('start-code-retry')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('start-code-value')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('responsive', () {
+    testWidgets('DRIVER_ARRIVED en 360x640 no produce overflow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ARRIVED',
+          agreedFare: '7.00',
+          driver: _assignedDriver(
+            vehicle: const AssignedDriverVehicle(
+              plate: '1234-AB',
+              brand: 'Bajaj Boxer muy largo',
+              model: 'RE 4S Edición especial',
+              color: 'Verde metálico',
+              vehicleType: 'MOTOTAXI',
+            ),
+          ),
+        ),
+        onGetRideOffers: (_) async => const [],
+        onGetStartCode: (_) async => _startCode(),
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+      await _flushAsync(tester);
+
+      expect(tester.takeException(), isNull);
+      await tester.drag(
+        find.byKey(const ValueKey('driver-tracking-scroll')),
+        const Offset(0, -600),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('DRIVER_ASSIGNED en 390x844 no produce overflow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ASSIGNED',
+          agreedFare: '7.00',
+          driver: _assignedDriver(),
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('DRIVER_ARRIVING en 412x915 no produce overflow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ARRIVING',
+          agreedFare: '7.00',
+          driver: _assignedDriver(),
+          driverLocation: _driverLocation(),
+          originLatitude: -6.4877,
+          originLongitude: -76.3599,
+          destinationLatitude: -6.4812,
+          destinationLongitude: -76.3651,
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(tester.takeException(), isNull);
+    });
+  });
 }
 
 class _FakeRideRepository extends RideRepository {
@@ -719,6 +1039,7 @@ class _FakeRideRepository extends RideRepository {
     required this.onGetRideOffers,
     this.onSelectRideOffer,
     this.onCancelRide,
+    this.onGetStartCode,
   }) : super(Dio());
 
   final Future<PassengerRide?> Function() onGetActiveRide;
@@ -730,10 +1051,13 @@ class _FakeRideRepository extends RideRepository {
   })?
   onSelectRideOffer;
   final Future<PassengerRide> Function(String rideId)? onCancelRide;
+  final Future<PassengerRideStartCode> Function(String rideId)?
+  onGetStartCode;
 
   int activeRideRequests = 0;
   int selectRequests = 0;
   int cancelRequests = 0;
+  int startCodeRequests = 0;
   String? selectedRideId;
   String? selectedOfferId;
   String? cancelledRideId;
@@ -776,6 +1100,19 @@ class _FakeRideRepository extends RideRepository {
 
     if (handler == null) {
       throw StateError('Cancel no configurado');
+    }
+
+    return handler(rideId);
+  }
+
+  @override
+  Future<PassengerRideStartCode> getStartCode(String rideId) {
+    startCodeRequests++;
+
+    final handler = onGetStartCode;
+
+    if (handler == null) {
+      throw StateError('GetStartCode no configurado');
     }
 
     return handler(rideId);
@@ -883,6 +1220,17 @@ DioException _dioCancelError(int statusCode) {
   );
 }
 
+DioException _dioStartCodeError() {
+  final requestOptions = RequestOptions(
+    path: 'passenger/rides/ride-real/start-code',
+  );
+
+  return DioException(
+    requestOptions: requestOptions,
+    response: Response<void>(requestOptions: requestOptions, statusCode: 409),
+  );
+}
+
 DioException _dioCancelNetworkError() {
   return DioException(
     requestOptions: RequestOptions(path: 'passenger/rides/ride-real/cancel'),
@@ -903,6 +1251,8 @@ PassengerRide _ride({
   double? originLongitude,
   double? destinationLatitude,
   double? destinationLongitude,
+  AssignedDriver? driver,
+  DriverLocation? driverLocation,
 }) {
   return PassengerRide(
     id: 'ride-real',
@@ -924,6 +1274,55 @@ PassengerRide _ride({
     destinationAddress: destinationAddress,
     requestedAt: DateTime.utc(2026, 8, 9),
     searchExpiresAt: null,
+    driver: driver,
+    driverLocation: driverLocation,
+  );
+}
+
+AssignedDriver _assignedDriver({
+  String profileId = 'driver-1',
+  String firstName = 'Carlos',
+  String? photoUrl,
+  String ratingAverage = '4.92',
+  int ratingCount = 128,
+  AssignedDriverVehicle? vehicle,
+}) {
+  return AssignedDriver(
+    profileId: profileId,
+    firstName: firstName,
+    photoUrl: photoUrl,
+    ratingAverage: ratingAverage,
+    ratingCount: ratingCount,
+    vehicle:
+        vehicle ??
+        const AssignedDriverVehicle(
+          plate: '1234-AB',
+          brand: 'Bajaj',
+          model: 'RE 4S',
+          color: 'Rojo',
+          vehicleType: 'MOTOTAXI',
+        ),
+  );
+}
+
+DriverLocation _driverLocation({
+  double latitude = -6.4879,
+  double longitude = -76.3601,
+}) {
+  return DriverLocation(latitude: latitude, longitude: longitude);
+}
+
+PassengerRideStartCode _startCode({
+  String code = '4821',
+  num remainingAttempts = 5,
+}) {
+  return PassengerRideStartCode(
+    rideId: 'ride-real',
+    code: code,
+    status: 'ACTIVE',
+    expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
+    remainingSeconds: 900,
+    remainingAttempts: remainingAttempts,
   );
 }
 
