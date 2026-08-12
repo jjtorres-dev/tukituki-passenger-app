@@ -2324,6 +2324,336 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
     );
   }
 
+  // ---------------------------------------------------------------------
+  // CANCELLED — Checkpoint G1P
+  //
+  // Cubre tanto la cancelación externa (detectada por polling, sin
+  // acción del Passenger) como el frame transitorio del self-cancel
+  // (que ya navega a Home antes de que este branch importe en la
+  // práctica — ver `_cancelSearch`). No distingue no-show: Backend no
+  // expone `cancellationType` a Passenger todavía, así que el copy se
+  // mantiene genérico a propósito.
+  // ---------------------------------------------------------------------
+
+  /// `null` cuando no hay una tarifa real que mostrar (ni `agreedFare`
+  /// ni `passengerOfferFare` resuelven a un monto &gt; 0) — se omite la
+  /// fila en vez de inventar `S/ 0.00`.
+  String? _cancelledFareDisplay(PassengerRide ride) {
+    final fare = ride.agreedFare ?? ride.passengerOfferFare;
+    final cents = fareAmountInCents(fare);
+
+    if (cents == null || cents <= 0) {
+      return null;
+    }
+
+    return _formatFare(fare);
+  }
+
+  Widget _buildCancelledHeader() {
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        color: _cream,
+        border: Border(bottom: BorderSide(color: _softBorder)),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: Image.asset(
+              'assets/images/tukituki_logo.png',
+              width: 50,
+              height: 50,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  width: 50,
+                  height: 50,
+                  color: _green,
+                  alignment: Alignment.center,
+                  child: const Icon(
+                    Icons.two_wheeler,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'TukiTuki',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _darkGreen,
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Círculo suave (no una alerta agresiva) con una X blanca. El
+  /// estado terminal ya se comunica también por el título y el texto,
+  /// así que el color nunca es la única señal (accesibilidad).
+  Widget _buildCancelledIcon() {
+    return Container(
+      key: const ValueKey('cancelled-icon'),
+      width: 84,
+      height: 84,
+      decoration: const BoxDecoration(
+        color: _destinationColor,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: const Icon(Icons.close, color: Colors.white, size: 40),
+    );
+  }
+
+  Widget _buildCancelledTripRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: _secondaryText, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: _secondaryText,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(value, style: const TextStyle(color: _primaryText, fontSize: 14)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Tarjeta "apagada": fondo/borde neutros (no la tarjeta verde
+  /// protagonista de un viaje activo) porque este viaje ya no
+  /// continuará. La tarifa, si existe, se muestra tachada — no
+  /// implica reembolso, solo que ya no aplica.
+  Widget _buildCancelledTripCard(PassengerRide ride) {
+    final fareDisplay = _cancelledFareDisplay(ride);
+
+    return Container(
+      key: const ValueKey('cancelled-trip-card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _secondaryCream,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _softBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildCancelledTripRow(
+            icon: Icons.my_location,
+            label: 'Origen',
+            value: ride.originAddress,
+          ),
+          const Divider(height: 24, color: _softBorder),
+          _buildCancelledTripRow(
+            icon: Icons.location_on,
+            label: 'Destino',
+            value: ride.destinationAddress,
+          ),
+          if (fareDisplay != null) ...[
+            const Divider(height: 24, color: _softBorder),
+            Row(
+              children: [
+                const Icon(
+                  Icons.payments_outlined,
+                  color: _secondaryText,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Tarifa que aplicaba',
+                    style: TextStyle(color: _secondaryText, fontSize: 13),
+                  ),
+                ),
+                Text(
+                  'S/ $fareDisplay',
+                  key: const ValueKey('cancelled-trip-fare-value'),
+                  style: const TextStyle(
+                    color: _secondaryText,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.lineThrough,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// `cancelledBy == 'DRIVER'` ya es un dato real que Backend expone
+  /// (ver Checkpoint G1P0). Cualquier otro valor, incluido `null`,
+  /// usa copy neutral: nunca se le atribuye la cancelación al
+  /// conductor sin ese dato confirmado.
+  Widget _buildCancelReasonCard(PassengerRide ride) {
+    final cancelledByDriver = ride.cancelledBy == 'DRIVER';
+
+    return Container(
+      key: const ValueKey('cancel-reason-card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: cancelledByDriver
+            ? const [
+                Text(
+                  'Cancelado por el conductor',
+                  style: TextStyle(
+                    color: _primaryText,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'El conductor canceló el viaje.\n'
+                  'Puedes solicitar uno nuevo cuando quieras.',
+                  style: TextStyle(
+                    color: _secondaryText,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ]
+            : const [
+                Text(
+                  'El viaje fue cancelado.',
+                  style: TextStyle(
+                    color: _secondaryText,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+      ),
+    );
+  }
+
+  Widget _buildExternallyCancelledScaffold(PassengerRide ride) {
+    return Scaffold(
+      backgroundColor: _cream,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildCancelledHeader(),
+            Expanded(
+              child: SingleChildScrollView(
+                key: const ValueKey('cancelled-scroll'),
+                padding: const EdgeInsets.fromLTRB(18, 28, 18, 28),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(child: _buildCancelledIcon()),
+                        const SizedBox(height: 20),
+                        const Text(
+                          'Viaje cancelado',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _primaryText,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Este viaje no llegó a completarse',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: _secondaryText, fontSize: 15),
+                        ),
+                        const SizedBox(height: 28),
+                        _buildCancelledTripCard(ride),
+                        const SizedBox(height: 16),
+                        _buildCancelReasonCard(ride),
+                        const SizedBox(height: 28),
+                        SizedBox(
+                          height: 52,
+                          child: FilledButton.icon(
+                            key: const ValueKey('cancelled-request-again-button'),
+                            onPressed: () => context.go('/home'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _ctaYellow,
+                              foregroundColor: _darkGreen,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              textStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            icon: const Icon(Icons.two_wheeler),
+                            label: const Text('Solicitar otro viaje'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 52,
+                          child: OutlinedButton.icon(
+                            key: const ValueKey('cancelled-go-home-button'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _darkGreen,
+                              side: const BorderSide(color: _darkGreen),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                            ),
+                            onPressed: () => context.go('/home'),
+                            icon: const Icon(Icons.home),
+                            label: const Text('Volver al inicio'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -2361,6 +2691,10 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
 
     if (ride.status == 'IN_PROGRESS') {
       return _buildInProgressScaffold(ride);
+    }
+
+    if (ride.status == 'CANCELLED') {
+      return _buildExternallyCancelledScaffold(ride);
     }
 
     return Scaffold(
@@ -2616,29 +2950,6 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('Cancelar búsqueda'),
-                  ),
-                ),
-              ],
-
-              if (ride.status == 'CANCELLED') ...[
-                const SizedBox(height: 32),
-
-                const Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        Icon(Icons.cancel, size: 54),
-                        SizedBox(height: 12),
-                        Text(
-                          'Viaje cancelado',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ],

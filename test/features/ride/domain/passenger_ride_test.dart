@@ -206,6 +206,103 @@ void main() {
 
     expect(ride.driverLocation, isNull);
   });
+
+  _cancellationTests();
+}
+
+void _cancellationTests() {
+  test('cancelledAt/cancelledBy/cancellationReason: campos ausentes quedan null', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(origin: {'address': 'Origen'}, destination: {'address': 'Destino'}),
+    );
+
+    expect(ride.cancelledAt, isNull);
+    expect(ride.cancelledBy, isNull);
+    expect(ride.cancellationReason, isNull);
+  });
+
+  test('cancelledAt/cancelledBy/cancellationReason: null explícito de Backend queda null', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: const {
+          'cancelledAt': null,
+          'cancelledBy': null,
+          'cancellationReason': null,
+        },
+      ),
+    );
+
+    expect(ride.cancelledAt, isNull);
+    expect(ride.cancelledBy, isNull);
+    expect(ride.cancellationReason, isNull);
+  });
+
+  test('cancelledAt parsea una fecha real', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: const {'cancelledAt': '2026-08-12T15:30:00.000Z'},
+      ),
+    );
+
+    expect(ride.cancelledAt, DateTime.utc(2026, 8, 12, 15, 30));
+  });
+
+  test('cancelledBy preserva el valor real de Backend (DRIVER)', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: const {'status': 'CANCELLED', 'cancelledBy': 'DRIVER'},
+      ),
+    );
+
+    expect(ride.cancelledBy, 'DRIVER');
+  });
+
+  test('cancelledBy preserva el valor real de Backend (PASSENGER)', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: const {'status': 'CANCELLED', 'cancelledBy': 'PASSENGER'},
+      ),
+    );
+
+    expect(ride.cancelledBy, 'PASSENGER');
+  });
+
+  test('status CANCELLED sin cancelledBy NUNCA infiere DRIVER', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: const {'status': 'CANCELLED'},
+      ),
+    );
+
+    expect(ride.status, 'CANCELLED');
+    expect(ride.cancelledBy, isNull);
+  });
+
+  test('cancellationReason conserva el string real de Backend', () {
+    final ride = PassengerRide.fromJson(
+      _rideJson(
+        origin: {'address': 'Origen'},
+        destination: {'address': 'Destino'},
+        extra: const {
+          'status': 'CANCELLED',
+          'cancelledBy': 'DRIVER',
+          'cancellationReason': 'VEHICLE_PROBLEM',
+        },
+      ),
+    );
+
+    expect(ride.cancellationReason, 'VEHICLE_PROBLEM');
+  });
 }
 
 Map<String, dynamic> _rideJson({

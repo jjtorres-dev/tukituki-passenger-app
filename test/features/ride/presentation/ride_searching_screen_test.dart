@@ -1149,6 +1149,314 @@ void main() {
     });
   });
 
+  group('CANCELLED externo (Checkpoint G1P)', () {
+    testWidgets(
+      'cancelledBy == DRIVER muestra la experiencia dedicada completa',
+      (tester) async {
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async => _ride(
+            status: 'CANCELLED',
+            agreedFare: '12.50',
+            originAddress: 'Jr. Lima 250, Tarapoto',
+            destinationAddress: 'Plaza de Armas de Morales',
+            cancelledBy: 'DRIVER',
+            cancellationReason: 'VEHICLE_PROBLEM',
+          ),
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        expect(find.text('Viaje cancelado'), findsOneWidget);
+        expect(find.text('Este viaje no llegó a completarse'), findsOneWidget);
+        expect(find.text('Cancelado por el conductor'), findsOneWidget);
+        expect(
+          find.text(
+            'El conductor canceló el viaje.\n'
+            'Puedes solicitar uno nuevo cuando quieras.',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Solicitar otro viaje'), findsOneWidget);
+        expect(find.text('Volver al inicio'), findsOneWidget);
+        expect(find.text('Jr. Lima 250, Tarapoto'), findsOneWidget);
+        expect(find.text('Plaza de Armas de Morales'), findsOneWidget);
+        expect(find.text('S/ 12.50'), findsOneWidget);
+      },
+    );
+
+    testWidgets('cancelledBy null usa copy neutral, nunca atribuye al conductor', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async =>
+            _ride(status: 'CANCELLED', agreedFare: '7.00'),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('Viaje cancelado'), findsOneWidget);
+      expect(find.text('Este viaje no llegó a completarse'), findsOneWidget);
+      expect(find.text('El viaje fue cancelado.'), findsOneWidget);
+      expect(find.text('Cancelado por el conductor'), findsNothing);
+    });
+
+    testWidgets('usa datos reales del ride, no textos del mockup', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '38.90',
+          originAddress: 'Av. Circunvalación 900',
+          destinationAddress: 'Terminal Terrestre Tarapoto',
+          cancelledBy: 'DRIVER',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('Av. Circunvalación 900'), findsOneWidget);
+      expect(find.text('Terminal Terrestre Tarapoto'), findsOneWidget);
+      expect(find.text('S/ 38.90'), findsOneWidget);
+      expect(find.text('S/ 5.00'), findsNothing);
+    });
+
+    testWidgets('sin tarifa real disponible, omite la fila en vez de S/ 0.00', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: null,
+          passengerOfferFare: '0.00',
+          cancelledBy: 'DRIVER',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('Tarifa que aplicaba'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('cancelled-trip-fare-value')),
+        findsNothing,
+      );
+      expect(find.text('S/ 0.00'), findsNothing);
+    });
+
+    testWidgets('NUNCA muestra copy de cobro/no-cobro', (tester) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '7.00',
+          cancelledBy: 'DRIVER',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.textContaining('cobro'), findsNothing);
+      expect(find.textContaining('cargo'), findsNothing);
+      expect(find.textContaining('cobrar'), findsNothing);
+    });
+
+    testWidgets('NUNCA muestra el motivo técnico crudo de Backend', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '7.00',
+          cancelledBy: 'DRIVER',
+          cancellationReason: 'VEHICLE_PROBLEM',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.textContaining('VEHICLE_PROBLEM'), findsNothing);
+    });
+
+    testWidgets('NUNCA muestra el reasonDetail escrito por el Driver', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '7.00',
+          cancelledBy: 'DRIVER',
+          cancellationReason: 'Se pinchó una llanta',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.textContaining('Se pinchó una llanta'), findsNothing);
+    });
+
+    testWidgets('CTA primario "Solicitar otro viaje" navega a Home', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '7.00',
+          cancelledBy: 'DRIVER',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+      final router = await _pumpRoutedScreen(tester, repository);
+      addTearDown(router.dispose);
+      addTearDown(() => _disposeScreen(tester));
+
+      final button = find.byKey(
+        const ValueKey('cancelled-request-again-button'),
+      );
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await _flushAsync(tester);
+
+      expect(router.routeInformationProvider.value.uri.path, '/home');
+      expect(find.text('HOME_DESTINATION'), findsOneWidget);
+      expect(repository.cancelRequests, 0);
+      expect(repository.selectRequests, 0);
+    });
+
+    testWidgets('CTA secundario "Volver al inicio" navega a Home', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '7.00',
+          cancelledBy: 'DRIVER',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+      final router = await _pumpRoutedScreen(tester, repository);
+      addTearDown(router.dispose);
+      addTearDown(() => _disposeScreen(tester));
+
+      final goHomeButton = find.byKey(
+        const ValueKey('cancelled-go-home-button'),
+      );
+      await tester.ensureVisible(goHomeButton);
+      await tester.tap(goHomeButton);
+      await _flushAsync(tester);
+
+      expect(router.routeInformationProvider.value.uri.path, '/home');
+      expect(find.text('HOME_DESTINATION'), findsOneWidget);
+    });
+
+    testWidgets('después de cualquier CTA, back no reabre el Ride cancelado', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '7.00',
+          cancelledBy: 'DRIVER',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+      final router = await _pumpRoutedScreen(tester, repository);
+      addTearDown(router.dispose);
+      addTearDown(() => _disposeScreen(tester));
+
+      final goHomeButton = find.byKey(
+        const ValueKey('cancelled-go-home-button'),
+      );
+      await tester.ensureVisible(goHomeButton);
+      await tester.tap(goHomeButton);
+      await _flushAsync(tester);
+
+      expect(find.text('HOME_DESTINATION'), findsOneWidget);
+
+      final canPop =
+          router.routerDelegate.navigatorKey.currentState?.canPop() ?? false;
+
+      expect(canPop, isFalse);
+    });
+
+    testWidgets('cancelación externa detectada por polling detiene el polling', (
+      tester,
+    ) async {
+      var callCount = 0;
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async {
+          callCount++;
+
+          if (callCount == 1) {
+            return _ride(
+              status: 'DRIVER_ASSIGNED',
+              agreedFare: '7.00',
+              driver: _assignedDriver(),
+            );
+          }
+
+          return _ride(
+            status: 'CANCELLED',
+            agreedFare: '7.00',
+            cancelledBy: 'DRIVER',
+          );
+        },
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(find.text('Viaje cancelado'), findsNothing);
+
+      await tester.pump(const Duration(seconds: 3));
+      await _flushAsync(tester);
+
+      expect(find.text('Viaje cancelado'), findsOneWidget);
+
+      final callsAfterCancel = repository.activeRideRequests;
+
+      await tester.pump(const Duration(seconds: 6));
+      await _flushAsync(tester);
+
+      expect(repository.activeRideRequests, callsAfterCancel);
+    });
+
+    testWidgets(
+      'GET active null (404) + GET by id CANCELLED renderiza la nueva UI',
+      (tester) async {
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async => null,
+          onGetRide: (rideId) async => _ride(
+            status: 'CANCELLED',
+            agreedFare: '7.00',
+            cancelledBy: 'DRIVER',
+          ),
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        expect(repository.getRideRequests, 1);
+        expect(find.text('Viaje cancelado'), findsOneWidget);
+        expect(find.text('Cancelado por el conductor'), findsOneWidget);
+      },
+    );
+  });
+
   group('responsive', () {
     testWidgets('DRIVER_ARRIVED en 360x640 no produce overflow', (
       tester,
@@ -1313,6 +1621,88 @@ void main() {
 
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+      'CANCELLED + DRIVER en 360x640 con direcciones y monto largos '
+      'no produce overflow',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 640);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async => _ride(
+            status: 'CANCELLED',
+            agreedFare: '125.50',
+            originAddress:
+                'Jr. Los Álamos Sur 1234, Urbanización Las Palmeras '
+                'del Este, Tarapoto',
+            destinationAddress:
+                'Avenida Circunvalación Norte 5678, Sector Industrial '
+                'La Molina, Morales',
+            cancelledBy: 'DRIVER',
+          ),
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        expect(tester.takeException(), isNull);
+
+        await tester.drag(
+          find.byKey(const ValueKey('cancelled-scroll')),
+          const Offset(0, -400),
+        );
+        await tester.pump();
+
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('CANCELLED + DRIVER en 390x844 no produce overflow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'CANCELLED',
+          agreedFare: '38.90',
+          cancelledBy: 'DRIVER',
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('CANCELLED sin cancelledBy en 412x915 no produce overflow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async =>
+            _ride(status: 'CANCELLED', agreedFare: '7.00'),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(tester.takeException(), isNull);
+    });
   });
 }
 
@@ -1323,6 +1713,7 @@ class _FakeRideRepository extends RideRepository {
     this.onSelectRideOffer,
     this.onCancelRide,
     this.onGetStartCode,
+    this.onGetRide,
   }) : super(Dio());
 
   final Future<PassengerRide?> Function() onGetActiveRide;
@@ -1337,7 +1728,14 @@ class _FakeRideRepository extends RideRepository {
   final Future<PassengerRideStartCode> Function(String rideId)?
   onGetStartCode;
 
+  /// Solo se invoca cuando `getActiveRide()` devuelve `null` (p.ej.
+  /// 404 tras un estado terminal) — mismo fallback real que usa
+  /// `_loadRide()`. Los tests que nunca necesitan este camino
+  /// (la mayoría) no lo configuran.
+  final Future<PassengerRide> Function(String rideId)? onGetRide;
+
   int activeRideRequests = 0;
+  int getRideRequests = 0;
   int selectRequests = 0;
   int cancelRequests = 0;
   int startCodeRequests = 0;
@@ -1349,6 +1747,19 @@ class _FakeRideRepository extends RideRepository {
   Future<PassengerRide?> getActiveRide() {
     activeRideRequests++;
     return onGetActiveRide();
+  }
+
+  @override
+  Future<PassengerRide> getRide(String rideId) {
+    getRideRequests++;
+
+    final handler = onGetRide;
+
+    if (handler == null) {
+      throw StateError('GetRide no configurado');
+    }
+
+    return handler(rideId);
   }
 
   @override
@@ -1536,6 +1947,9 @@ PassengerRide _ride({
   double? destinationLongitude,
   AssignedDriver? driver,
   DriverLocation? driverLocation,
+  DateTime? cancelledAt,
+  String? cancelledBy,
+  String? cancellationReason,
 }) {
   return PassengerRide(
     id: 'ride-real',
@@ -1559,6 +1973,9 @@ PassengerRide _ride({
     searchExpiresAt: null,
     driver: driver,
     driverLocation: driverLocation,
+    cancelledAt: cancelledAt,
+    cancelledBy: cancelledBy,
+    cancellationReason: cancellationReason,
   );
 }
 

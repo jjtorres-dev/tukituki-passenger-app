@@ -28,6 +28,9 @@ class PassengerRide {
     this.driverArrivingAt,
     this.driverArrivedAt,
     this.arrivalDistanceMeters,
+    this.cancelledAt,
+    this.cancelledBy,
+    this.cancellationReason,
   });
 
   final String id;
@@ -63,6 +66,21 @@ class PassengerRide {
   final DateTime? driverArrivingAt;
   final DateTime? driverArrivedAt;
   final String? arrivalDistanceMeters;
+
+  final DateTime? cancelledAt;
+
+  /// Valor crudo de `RideCancellationActor` (`PASSENGER`/`DRIVER`/
+  /// `ADMIN`/`SYSTEM`), tal como lo envía Backend. No distingue una
+  /// cancelación normal del conductor de un no-show confirmado por él
+  /// — ambos casos llegan con `cancelledBy == 'DRIVER'`. No inventar
+  /// esa distinción aquí: Backend no expone `cancellationType` a
+  /// Passenger todavía.
+  final String? cancelledBy;
+
+  /// Texto libre/enum-como-string de Backend (`cancellationReason`).
+  /// Nunca se muestra tal cual en la UI de cancelación externa — solo
+  /// se conserva por si una pantalla futura lo necesita.
+  final String? cancellationReason;
 
   factory PassengerRide.fromJson(Map<String, dynamic> json) {
     final originValue = json['origin'];
@@ -177,6 +195,12 @@ class PassengerRide {
       ),
 
       arrivalDistanceMeters: json['arrivalDistanceMeters']?.toString(),
+
+      cancelledAt: DateTime.tryParse(json['cancelledAt']?.toString() ?? ''),
+
+      cancelledBy: json['cancelledBy']?.toString(),
+
+      cancellationReason: json['cancellationReason']?.toString(),
     );
   }
 }
