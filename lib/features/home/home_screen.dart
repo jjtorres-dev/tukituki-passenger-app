@@ -47,6 +47,15 @@ class _HomeScreenState
     -76.3599,
   );
 
+  /// Literal local que marca "el Passenger todavía no tiene una
+  /// dirección real para este destino" (recién tocó el mapa, sin
+  /// pasar por autocomplete). Mismo texto que Backend reconoce como
+  /// señal para hacer reverse geocoding — G4B-R5.2 lo reutiliza para
+  /// saber, cuando llega el FareQuote, si corresponde reemplazar
+  /// esta tarjeta por la dirección real que Backend ya resolvió.
+  static const String _manualDestinationPlaceholder =
+      'Destino seleccionado en el mapa';
+
   GoogleMapController? _mapController;
 
   final TextEditingController
@@ -90,6 +99,29 @@ class _HomeScreenState
 
   FareEstimate? _quote;
 
+  /// Expone el id de la cotización vigente únicamente para tests
+  /// (verificar cuál request "ganó" ante selecciones de destino
+  /// concurrentes — G4B-R5.1). No se usa en producción.
+  @visibleForTesting
+  String? get debugQuoteId => _quote?.quoteId;
+
+  /// Generación de la última solicitud de cotización disparada.
+  /// Evita que una respuesta/errores tardíos de un `_estimateFare`
+  /// obsoleto (destino cambiado mientras la llamada anterior seguía
+  /// en vuelo) pisen el estado de una selección de destino más
+  /// reciente — G4B-R5. Solo protege de verdad si, al cambiar de
+  /// destino, efectivamente arranca una NUEVA solicitud que
+  /// incremente este contador (ver `_lastEstimateRequestDestination`
+  /// y `_maybeAutoEstimateFare` — G4B-R5.1).
+  int _quoteRequestId = 0;
+
+  /// Destino para el que arrancó la última solicitud de cotización
+  /// (en vuelo o ya resuelta). Permite a `_maybeAutoEstimateFare`
+  /// distinguir "ya estoy pidiendo esto mismo, no dupliques" de "el
+  /// destino cambió de verdad, hay que pedir una nueva aunque la
+  /// anterior siga en vuelo" — G4B-R5.1.
+  LatLng? _lastEstimateRequestDestination;
+
   @override
   void initState() {
     super.initState();
@@ -113,6 +145,13 @@ class _HomeScreenState
     _quoteExpiryTimer = null;
   }
 
+  /// G4B-R5.1: al vencer, la cotización se renueva sola — el
+  /// Passenger nunca ve un botón "Calcular nueva tarifa". Llama
+  /// directo a `_estimateFare()` (no a `_maybeAutoEstimateFare`,
+  /// cuyo guard de "ya hay quote" bloquearía justo lo que acá
+  /// queremos: reemplazar una quote existente pero vencida).
+  /// `_estimateFare` nunca toca `_passengerOfferController`, así que
+  /// la oferta que el Passenger ya escribió sobrevive intacta.
   void _scheduleQuoteExpiryTimer(
     FareEstimate quote,
   ) {
@@ -124,7 +163,7 @@ class _HomeScreenState
 
     if (duration <= Duration.zero) {
       if (mounted) {
-        setState(() {});
+        _estimateFare();
       }
 
       return;
@@ -139,7 +178,7 @@ class _HomeScreenState
           return;
         }
 
-        setState(() {});
+        _estimateFare();
       },
     );
   }
@@ -270,6 +309,8 @@ class _HomeScreenState
         _quote = null;
         _routePoints = const [];
       });
+
+      _maybeAutoEstimateFare();
 
       await _moveCameraToCurrentLocation();
     } catch (error) {
@@ -477,7 +518,7 @@ class _HomeScreenState
           'Destino en el mapa';
 
       _selectedDestinationAddress =
-          'Destino seleccionado en el mapa';
+          _manualDestinationPlaceholder;
 
       _placePredictions = const [];
       _placeSearchMessage = null;
@@ -486,6 +527,8 @@ class _HomeScreenState
       _quote = null;
       _routePoints = const [];
     });
+
+    _maybeAutoEstimateFare();
   }
 
   void _clearDestination() {
@@ -742,6 +785,8 @@ class _HomeScreenState
         setState(() {
           _loadingPlaceDetails = false;
         });
+
+        _maybeAutoEstimateFare();
       }
     }
   }
@@ -938,6 +983,36 @@ class _HomeScreenState
     return points;
   }
 
+  /// G4B-R5: dispara `_estimateFare` automáticamente en cuanto
+  /// origen y destino están listos, sin esperar un tap manual.
+  /// Nunca se llama desde `build()` (evitaría loops de setState) —
+  /// solo desde los handlers que cambian destino o posición.
+  ///
+  /// G4B-R5.1: "ya hay una solicitud en vuelo" solo bloquea un
+  /// disparo nuevo si es para el MISMO destino (evita duplicados
+  /// inútiles). Si el destino cambió de verdad mientras la anterior
+  /// seguía en vuelo, se deja pasar a propósito: `_estimateFare`
+  /// arranca de inmediato e invalida la anterior al incrementar
+  /// `_quoteRequestId`, en vez de esperar a que termine (eso dejaría
+  /// la pantalla bloqueada esperando una respuesta que ya no importa).
+  void _maybeAutoEstimateFare() {
+    final destination = _selectedDestination;
+
+    if (_currentPosition == null || destination == null) {
+      return;
+    }
+
+    if (_requestingRide || _quote != null) {
+      return;
+    }
+
+    if (_loading && _lastEstimateRequestDestination == destination) {
+      return;
+    }
+
+    _estimateFare();
+  }
+
   Future<void> _estimateFare() async {
     final position =
         _currentPosition;
@@ -973,6 +1048,14 @@ class _HomeScreenState
 
     _cancelQuoteExpiryTimer();
 
+    final requestId = ++_quoteRequestId;
+
+    // G4B-R5.1: marca INMEDIATAMENTE (antes del await) para qué
+    // destino es esta solicitud. Cualquier solicitud anterior para
+    // un destino distinto queda invalidada desde ya por el cambio
+    // de `_quoteRequestId`, sin esperar a que esa anterior termine.
+    _lastEstimateRequestDestination = destination;
+
     setState(() {
       _loading = true;
       _quote = null;
@@ -997,10 +1080,10 @@ class _HomeScreenState
 
             destinationAddress:
                 _selectedDestinationAddress ??
-                'Destino seleccionado en el mapa',
+                _manualDestinationPlaceholder,
           );
 
-      if (!mounted) {
+      if (!mounted || requestId != _quoteRequestId) {
         return;
       }
 
@@ -1014,12 +1097,31 @@ class _HomeScreenState
                   encodedPolyline,
                 );
 
-      _passengerOfferController.text =
-          quote.estimatedFare;
+      // G4B-R5.2: si el destino vino de un tap en el mapa (todavía
+      // muestra el placeholder local), reemplaza la tarjeta Home por
+      // la dirección real que Backend ya resolvió — sin volver a
+      // pedir un FareQuote ni tocar coordenadas. Autocomplete nunca
+      // deja este placeholder puesto, así que este bloque nunca lo
+      // toca (no rompe "B" del checkpoint). Vive DESPUÉS del check
+      // de `requestId` de arriba, así que una respuesta obsoleta de
+      // un destino anterior jamás llega hasta acá (protege Caso 4).
+      final resolvedDestinationAddress =
+          quote.destinationAddress.trim();
+
+      final destinationAddressResolved =
+          _selectedDestinationAddress ==
+              _manualDestinationPlaceholder &&
+          resolvedDestinationAddress.isNotEmpty;
 
       setState(() {
         _quote = quote;
         _routePoints = routePoints;
+
+        if (destinationAddressResolved) {
+          _selectedDestinationName =
+              resolvedDestinationAddress;
+          _selectedDestinationAddress = null;
+        }
       });
 
       _scheduleQuoteExpiryTimer(quote);
@@ -1028,7 +1130,7 @@ class _HomeScreenState
         await _fitCameraToRoute();
       }
     } on DioException catch (error) {
-      if (!mounted) {
+      if (!mounted || requestId != _quoteRequestId) {
         return;
       }
 
@@ -1068,7 +1170,7 @@ class _HomeScreenState
         'Error calculando tarifa: $error',
       );
 
-      if (!mounted) {
+      if (!mounted || requestId != _quoteRequestId) {
         return;
       }
 
@@ -1081,7 +1183,7 @@ class _HomeScreenState
         ),
       );
     } finally {
-      if (mounted) {
+      if (mounted && requestId == _quoteRequestId) {
         setState(() {
           _loading = false;
         });
@@ -1101,15 +1203,18 @@ class _HomeScreenState
     }
 
     if (_isQuoteExpired(quote)) {
+      // G4B-R5.1: caso límite (venció justo al tocar el CTA) — se
+      // renueva sola, sin pedirle al Passenger una acción manual.
       ScaffoldMessenger.of(context)
           .showSnackBar(
         const SnackBar(
           content: Text(
-            'La cotización venció. '
-            'Calcula una nueva tarifa.',
+            'La cotización venció. Actualizándola...',
           ),
         ),
       );
+
+      _estimateFare();
 
       return;
     }
@@ -1352,7 +1457,18 @@ class _HomeScreenState
         keyboardInset > 0;
     late final String ctaLabel;
     late final VoidCallback? ctaOnPressed;
-    late final IconData ctaIcon;
+    // G4B-R5: null = sin icono. La cotización ya no depende de un
+    // tap manual ("Calcular tarifa" dejó de ser un paso visible);
+    // `_maybeAutoEstimateFare` la dispara sola apenas hay destino.
+    //
+    // G4B-R5.1: la expiración también se renueva sola
+    // (`_scheduleQuoteExpiryTimer` llama a `_estimateFare` sin
+    // esperar un tap). Este branch (quote == null, ya sin loading)
+    // solo se ve de verdad cuando la solicitud automática — inicial
+    // o de renovación — falló por un error real: es un retry manual
+    // neutral ("Reintentar"), nunca vuelve a decir "Calcular
+    // [nueva] tarifa".
+    late final IconData? ctaIcon;
 
     if (_loading) {
       ctaLabel = 'Calculando tarifa...';
@@ -1366,13 +1482,8 @@ class _HomeScreenState
       ctaLabel = 'Selecciona un destino';
       ctaOnPressed = null;
       ctaIcon = Icons.location_on_outlined;
-    } else if (quote == null) {
-      ctaLabel = 'Calcular tarifa';
-      ctaOnPressed =
-          canEstimate ? _estimateFare : null;
-      ctaIcon = Icons.route;
-    } else if (quoteExpired) {
-      ctaLabel = 'Calcular nueva tarifa';
+    } else if (quote == null || quoteExpired) {
+      ctaLabel = 'Reintentar';
       ctaOnPressed =
           canEstimate ? _estimateFare : null;
       ctaIcon = Icons.refresh;
@@ -1380,11 +1491,25 @@ class _HomeScreenState
       ctaLabel = 'Ofrecer y buscar conductor';
       ctaOnPressed =
           canRequestRide ? _requestRide : null;
-      ctaIcon = Icons.two_wheeler;
+      // G4B-R5: sin icono de moto en este CTA.
+      ctaIcon = null;
     }
 
     final ctaShowsProgress =
         _loading || _requestingRide;
+    final ctaButtonStyle = FilledButton.styleFrom(
+      backgroundColor: _ctaYellow,
+      foregroundColor: _darkGreen,
+      disabledBackgroundColor: _softBorder,
+      disabledForegroundColor: _secondaryText,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(17),
+      ),
+      textStyle: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w800,
+      ),
+    );
     final mapHeight = keyboardVisible
         ? 150.0
         : (mediaQuery.size.height * 0.33)
@@ -2195,44 +2320,6 @@ class _HomeScreenState
                                 CrossAxisAlignment.stretch,
                             children: [
                               const Text(
-                                'Precio recomendado TukiTuki',
-                                textAlign:
-                                    TextAlign.center,
-                                style: TextStyle(
-                                  color: Color(
-                                    0xFFDCE7DE,
-                                  ),
-                                  fontSize: 13,
-                                  fontWeight:
-                                      FontWeight.w600,
-                                ),
-                              ),
-
-                              const SizedBox(
-                                height:
-                                    6,
-                              ),
-
-                              Text(
-                                'S/ ${quote.estimatedFare}',
-                                textAlign:
-                                    TextAlign.center,
-                                style:
-                                    const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 38,
-                                  fontWeight:
-                                      FontWeight.w800,
-                                  letterSpacing: -1,
-                                ),
-                              ),
-
-                              const SizedBox(
-                                height:
-                                    20,
-                              ),
-
-                              const Text(
                                 '¿Cuánto quieres ofrecer?',
                                 style:
                                     TextStyle(
@@ -2249,6 +2336,10 @@ class _HomeScreenState
                               ),
 
                               TextField(
+                                key: const ValueKey(
+                                  'passenger-offer-field',
+                                ),
+
                                 controller:
                                     _passengerOfferController,
 
@@ -2415,35 +2506,6 @@ class _HomeScreenState
                                   ),
                                 ],
                               ),
-
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment:
-                                    Alignment.center,
-                                child: TextButton.icon(
-                                  onPressed: canEstimate
-                                      ? _estimateFare
-                                      : null,
-                                  style:
-                                      TextButton.styleFrom(
-                                    foregroundColor:
-                                        const Color(
-                                      0xFFDCE7DE,
-                                    ),
-                                    disabledForegroundColor:
-                                        _secondaryText,
-                                    visualDensity:
-                                        VisualDensity.compact,
-                                  ),
-                                  icon: const Icon(
-                                    Icons.refresh,
-                                    size: 18,
-                                  ),
-                                  label: const Text(
-                                    'Recalcular tarifa',
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         ),
@@ -2486,40 +2548,33 @@ class _HomeScreenState
               ),
               child: SizedBox(
                 height: 54,
-                child: FilledButton.icon(
-                  onPressed: ctaOnPressed,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _ctaYellow,
-                    foregroundColor: _darkGreen,
-                    disabledBackgroundColor:
-                        _softBorder,
-                    disabledForegroundColor:
-                        _secondaryText,
-                    shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(17),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 16,
-                      fontWeight:
-                          FontWeight.w800,
-                    ),
-                  ),
-                  icon: ctaShowsProgress
-                      ? const SizedBox(
-                          width: 19,
-                          height: 19,
-                          child:
-                              CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: _darkGreen,
-                          ),
-                        )
-                      : Icon(
-                          ctaIcon,
-                        ),
-                  label: Text(ctaLabel),
-                ),
+                // G4B-R5: "Ofrecer y buscar conductor" no lleva
+                // icono — únicamente ese estado (ctaIcon null y sin
+                // progreso) usa un FilledButton sin `.icon`.
+                child: !ctaShowsProgress && ctaIcon == null
+                    ? FilledButton(
+                        onPressed: ctaOnPressed,
+                        style: ctaButtonStyle,
+                        child: Text(ctaLabel),
+                      )
+                    : FilledButton.icon(
+                        onPressed: ctaOnPressed,
+                        style: ctaButtonStyle,
+                        icon: ctaShowsProgress
+                            ? const SizedBox(
+                                width: 19,
+                                height: 19,
+                                child:
+                                    CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: _darkGreen,
+                                ),
+                              )
+                            : Icon(
+                                ctaIcon,
+                              ),
+                        label: Text(ctaLabel),
+                      ),
               ),
             ),
           ),
