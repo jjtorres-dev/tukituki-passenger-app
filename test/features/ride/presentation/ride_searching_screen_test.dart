@@ -734,7 +734,7 @@ void main() {
 
       expect(find.text('¡Conductor encontrado!'), findsOneWidget);
       expect(find.text('Tu mototaxi está en camino'), findsOneWidget);
-      expect(find.text('Julio'), findsOneWidget);
+      expect(find.text('Julio M.'), findsOneWidget);
       expect(find.text('S/ 6.50'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('assigned-driver-plate')),
@@ -832,7 +832,7 @@ void main() {
       addTearDown(() => _disposeScreen(tester));
 
       expect(find.text('Tu conductor está en camino'), findsOneWidget);
-      expect(find.text('Carlos'), findsOneWidget);
+      expect(find.text('Carlos M.'), findsOneWidget);
       expect(
         find.byWidgetPredicate(
           (widget) =>
@@ -854,6 +854,32 @@ void main() {
         isTrue,
       );
     });
+
+    testWidgets(
+      'R4.3C: aunque haya foto real, la tarjeta NO es tappable en DRIVER_ARRIVING (solo DRIVER_ARRIVED)',
+      (tester) async {
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async => _ride(
+            status: 'DRIVER_ARRIVING',
+            agreedFare: '7.00',
+            driver: _assignedDriver(
+              photoUrl: 'https://cdn.tukituki.pe/carlos.jpg',
+            ),
+          ),
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+        await _flushAsync(tester);
+
+        expect(find.text('Tu conductor está en camino'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsNothing,
+        );
+      },
+    );
 
     testWidgets('driverLocation null no agrega marker ni crashea', (
       tester,
@@ -906,11 +932,125 @@ void main() {
       addTearDown(() => _disposeScreen(tester));
       await _flushAsync(tester);
 
-      expect(find.text('Tu conductor llegó'), findsOneWidget);
+      expect(find.text('Tu conductor ya llegó'), findsOneWidget);
       expect(find.text('4821'), findsOneWidget);
       expect(find.text('4 intentos disponibles'), findsOneWidget);
       expect(repository.startCodeRequests, 1);
     });
+
+    testWidgets(
+      'identificación completa: nombre real, foto/placeholder y vehículo visibles, nunca "Por llegar"',
+      (tester) async {
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async => _ride(
+            status: 'DRIVER_ARRIVED',
+            agreedFare: '7.00',
+            driver: _assignedDriver(firstName: 'Juan', photoUrl: null),
+          ),
+          onGetRideOffers: (_) async => const [],
+          onGetStartCode: (_) async => _startCode(
+            code: '4821',
+            remainingAttempts: 4,
+          ),
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+        await _flushAsync(tester);
+
+        expect(find.text('Tu conductor ya llegó'), findsOneWidget);
+        expect(
+          find.text('Identifica a tu conductor antes de subir.'),
+          findsOneWidget,
+        );
+        expect(find.text('Juan M.'), findsOneWidget);
+        expect(find.text('J'), findsOneWidget);
+        expect(find.text('Bajaj · RE 4S · Rojo'), findsOneWidget);
+        expect(find.text('1234-AB'), findsOneWidget);
+
+        expect(find.textContaining('Por llegar'), findsNothing);
+        expect(find.textContaining('DNI'), findsNothing);
+        expect(find.textContaining('@'), findsNothing);
+
+        // R4.3C: sin foto real, el avatar/placeholder NUNCA es tappable
+        // — nunca se abre un viewer vacío.
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'R4.3C: con foto real, el avatar es tappable (sin agrandar toda la tarjeta)',
+      (tester) async {
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async => _ride(
+            status: 'DRIVER_ARRIVED',
+            agreedFare: '7.00',
+            driver: _assignedDriver(
+              firstName: 'Juan',
+              photoUrl: 'https://cdn.tukituki.pe/juan.jpg',
+            ),
+          ),
+          onGetRideOffers: (_) async => const [],
+          onGetStartCode: (_) async => _startCode(
+            code: '4821',
+            remainingAttempts: 4,
+          ),
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+        await _flushAsync(tester);
+
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsOneWidget,
+        );
+
+        // La tarjeta sigue siendo la misma compacta — sin variante
+        // "prominent": mismo tamaño de fuente que DRIVER_ASSIGNED/ARRIVING.
+        final nameText = tester.widget<Text>(
+          find.byKey(const ValueKey('assigned-driver-name')),
+        );
+        expect(nameText.style?.fontSize, 18);
+
+        // Tap abre el viewer ampliado. Se evita pumpAndSettle() a
+        // propósito: el polling activo del ride (Timer.periodic) nunca
+        // deja que la pantalla llegue a quiescencia; se pumpea el
+        // tiempo suficiente para cubrir la transición del diálogo.
+        await tester.tap(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(
+          find.byKey(const ValueKey('driver-photo-viewer')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('driver-photo-viewer-close')),
+          findsOneWidget,
+        );
+
+        // Cerrar con X regresa exactamente al mismo ride en DRIVER_ARRIVED,
+        // sin refresh/routing/request nueva.
+        await tester.tap(
+          find.byKey(const ValueKey('driver-photo-viewer-close')),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(
+          find.byKey(const ValueKey('driver-photo-viewer')),
+          findsNothing,
+        );
+        expect(find.text('Tu conductor ya llegó'), findsOneWidget);
+        expect(repository.activeRideRequests, 1);
+      },
+    );
 
     testWidgets('error al obtener el PIN muestra estado seguro sin PIN falso', (
       tester,
@@ -937,6 +1077,233 @@ void main() {
       expect(find.byKey(const ValueKey('start-code-value')), findsNothing);
       expect(tester.takeException(), isNull);
     });
+  });
+
+  group('R4.3E: DRIVER PHOTO STABILITY (polling)', () {
+    testWidgets(
+      'poll transitorio con photoUrl null conserva la última foto válida del mismo Driver',
+      (tester) async {
+        var callCount = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            callCount++;
+
+            return _ride(
+              status: 'DRIVER_ARRIVED',
+              agreedFare: '7.00',
+              driver: _assignedDriver(
+                photoUrl: callCount == 1
+                    ? 'https://cdn.tukituki.pe/carlos-a.jpg'
+                    : null,
+              ),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+          onGetStartCode: (_) async =>
+              _startCode(code: '4821', remainingAttempts: 4),
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+        await _flushAsync(tester);
+
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsOneWidget,
+        );
+
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+
+        // El poll #2 llegó con photoUrl null (transitorio, mismo
+        // Driver/ride) — la foto A sigue visible y tappable, no cae a
+        // placeholder.
+        expect(callCount, greaterThanOrEqualTo(2));
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'rotación de capability URL (misma foto, distinto token) no tumba el avatar y el viewer usa la más reciente',
+      (tester) async {
+        var callCount = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            callCount++;
+
+            return _ride(
+              status: 'DRIVER_ARRIVED',
+              agreedFare: '7.00',
+              driver: _assignedDriver(
+                photoUrl: callCount == 1
+                    ? 'https://cdn.tukituki.pe/avatars/driver-1?token=aaa'
+                    : 'https://cdn.tukituki.pe/avatars/driver-1?token=bbb',
+              ),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+          onGetStartCode: (_) async =>
+              _startCode(code: '4821', remainingAttempts: 4),
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+        await _flushAsync(tester);
+
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsOneWidget,
+        );
+
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+
+        expect(callCount, greaterThanOrEqualTo(2));
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsOneWidget,
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(
+          find.byKey(const ValueKey('driver-photo-viewer')),
+          findsOneWidget,
+        );
+
+        final viewerImage = tester.widget<Image>(
+          find.descendant(
+            of: find.byKey(const ValueKey('driver-photo-viewer')),
+            matching: find.byType(Image),
+          ),
+        );
+        final viewerProvider = viewerImage.image as NetworkImage;
+
+        // El estado final usa la capability más reciente (token=bbb),
+        // nunca la primera URL ya rotada.
+        expect(viewerProvider.url, contains('token=bbb'));
+      },
+    );
+
+    testWidgets(
+      'cambio legítimo de Driver descarta la foto anterior y nunca la conserva para el nuevo Driver',
+      (tester) async {
+        var callCount = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            callCount++;
+
+            if (callCount == 1) {
+              return _ride(
+                status: 'DRIVER_ARRIVED',
+                agreedFare: '7.00',
+                driver: _assignedDriver(
+                  profileId: 'driver-a',
+                  firstName: 'Carlos',
+                  photoUrl: 'https://cdn.tukituki.pe/carlos.jpg',
+                ),
+              );
+            }
+
+            return _ride(
+              status: 'DRIVER_ARRIVED',
+              agreedFare: '7.00',
+              driver: _assignedDriver(
+                profileId: 'driver-b',
+                firstName: 'Renzo',
+                photoUrl: null,
+              ),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+          onGetStartCode: (_) async =>
+              _startCode(code: '4821', remainingAttempts: 4),
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+        await _flushAsync(tester);
+
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsOneWidget,
+        );
+
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+
+        expect(callCount, greaterThanOrEqualTo(2));
+        expect(find.text('Renzo M.'), findsOneWidget);
+        // El nuevo Driver (driver-b) no tiene foto propia -> placeholder,
+        // NUNCA tappable, y jamás hereda la foto de Carlos (driver-a).
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'un ride activo distinto entre polls no contamina la foto con la del ride anterior',
+      (tester) async {
+        var callCount = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            callCount++;
+
+            if (callCount == 1) {
+              return _ride(
+                id: 'ride-one',
+                status: 'DRIVER_ARRIVED',
+                agreedFare: '7.00',
+                driver: _assignedDriver(
+                  profileId: 'driver-a',
+                  photoUrl: 'https://cdn.tukituki.pe/carlos.jpg',
+                ),
+              );
+            }
+
+            return _ride(
+              id: 'ride-two',
+              status: 'DRIVER_ARRIVED',
+              agreedFare: '7.00',
+              driver: _assignedDriver(profileId: 'driver-a', photoUrl: null),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+          onGetStartCode: (_) async =>
+              _startCode(code: '4821', remainingAttempts: 4),
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+        await _flushAsync(tester);
+
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsOneWidget,
+        );
+
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+
+        expect(callCount, greaterThanOrEqualTo(2));
+        // Mismo profileId ('driver-a') pero OTRO ride (ride-two): la
+        // memoria en RAM está scoped por ride, así que NO hereda la
+        // foto de ride-one aunque el profileId coincida.
+        expect(
+          find.byKey(const ValueKey('assigned-driver-avatar-tap')),
+          findsNothing,
+        );
+      },
+    );
   });
 
   group('IN_PROGRESS', () {
@@ -968,7 +1335,7 @@ void main() {
         );
         expect(find.text('S/ 7.50'), findsOneWidget);
         expect(find.text('Jr. Amazonas 450'), findsOneWidget);
-        expect(find.text('Julio'), findsOneWidget);
+        expect(find.text('Julio M.'), findsOneWidget);
         expect(
           find.byKey(const ValueKey('assigned-driver-plate')),
           findsOneWidget,
@@ -1111,7 +1478,7 @@ void main() {
       addTearDown(() => _disposeScreen(tester));
 
       expect(find.text('Viaje en curso'), findsOneWidget);
-      expect(find.text('Julio'), findsOneWidget);
+      expect(find.text('Julio M.'), findsOneWidget);
       expect(repository.startCodeRequests, 0);
       expect(tester.takeException(), isNull);
     });
@@ -1934,6 +2301,7 @@ DioException _dioCancelNetworkError() {
 }
 
 PassengerRide _ride({
+  String id = 'ride-real',
   String status = 'SEARCHING_DRIVER',
   String? agreedFare,
   num distanceMeters = 1500,
@@ -1952,7 +2320,7 @@ PassengerRide _ride({
   String? cancellationReason,
 }) {
   return PassengerRide(
-    id: 'ride-real',
+    id: id,
     fareQuoteId: 'quote-1',
     status: status,
     distanceMeters: distanceMeters,
@@ -1982,6 +2350,7 @@ PassengerRide _ride({
 AssignedDriver _assignedDriver({
   String profileId = 'driver-1',
   String firstName = 'Carlos',
+  String lastNameInitial = 'M.',
   String? photoUrl,
   String ratingAverage = '4.92',
   int ratingCount = 128,
@@ -1990,6 +2359,7 @@ AssignedDriver _assignedDriver({
   return AssignedDriver(
     profileId: profileId,
     firstName: firstName,
+    lastNameInitial: lastNameInitial,
     photoUrl: photoUrl,
     ratingAverage: ratingAverage,
     ratingCount: ratingCount,

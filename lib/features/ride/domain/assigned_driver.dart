@@ -28,6 +28,7 @@ class AssignedDriver {
   const AssignedDriver({
     required this.profileId,
     required this.firstName,
+    required this.lastNameInitial,
     this.photoUrl,
     required this.ratingAverage,
     required this.ratingCount,
@@ -36,6 +37,7 @@ class AssignedDriver {
 
   final String profileId;
   final String firstName;
+  final String lastNameInitial;
   final String? photoUrl;
   final String ratingAverage;
   final int ratingCount;
@@ -80,6 +82,7 @@ class AssignedDriver {
     return AssignedDriver(
       profileId: json['profileId']?.toString() ?? '',
       firstName: json['firstName']?.toString() ?? '',
+      lastNameInitial: json['lastNameInitial']?.toString() ?? '',
       photoUrl: json['photoUrl']?.toString(),
       ratingAverage: json['ratingAverage']?.toString() ?? '0.00',
       ratingCount: toInt(json['ratingCount']),

@@ -49,4 +49,43 @@ void main() {
       expect(displayCompactName('Juan', 'pérez'), 'Juan P.');
     });
   });
+
+  group('displayCompactNameFromInitial', () {
+    test('nombre + inicial ya derivada -> se combinan tal cual', () {
+      expect(displayCompactNameFromInitial('Juan', 'P.'), 'Juan P.');
+    });
+
+    test('recorta espacios en los extremos de ambos campos', () {
+      expect(displayCompactNameFromInitial(' Juan ', ' P. '), 'Juan P.');
+    });
+
+    test('sin inicial -> solo el nombre', () {
+      expect(displayCompactNameFromInitial('Juan', null), 'Juan');
+    });
+
+    test('inicial vacía -> solo el nombre', () {
+      expect(displayCompactNameFromInitial('Juan', ''), 'Juan');
+    });
+
+    test('inicial solo espacios (legacy) -> solo el nombre', () {
+      expect(displayCompactNameFromInitial('Juan', '   '), 'Juan');
+    });
+
+    test('ambos null -> cadena vacía, nunca "null"', () {
+      final result = displayCompactNameFromInitial(null, null);
+
+      expect(result, '');
+      expect(result, isNot(contains('null')));
+    });
+
+    test('nombre vacío con inicial presente -> cadena vacía', () {
+      expect(displayCompactNameFromInitial('', 'P.'), '');
+    });
+
+    test('nunca produce espacios dobles', () {
+      final result = displayCompactNameFromInitial('Juan', 'P.');
+
+      expect(result, isNot(contains('  ')));
+    });
+  });
 }

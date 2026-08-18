@@ -25,3 +25,30 @@ String displayCompactName(String? firstName, String? lastName) {
 
   return '$first $initial.';
 }
+
+/// Igual que [displayCompactName], pero para contratos donde Backend ya
+/// envía la inicial del apellido pre-derivada (p.ej. "P."), en vez del
+/// apellido completo — el caso del Driver visto por el Passenger desde
+/// R4.3 (`AssignedDriverResponseDto.lastNameInitial`,
+/// `PassengerRideOfferDriverDto.lastNameInitial`).
+///
+/// Mismas garantías defensivas que [displayCompactName]: recorta
+/// espacios, nunca produce "null" ni un "." suelto/doble, y si no hay
+/// nombre devuelve cadena vacía en vez de inventar un placeholder.
+String displayCompactNameFromInitial(
+  String? firstName,
+  String? lastNameInitial,
+) {
+  final first = firstName?.trim() ?? '';
+  final initial = lastNameInitial?.trim() ?? '';
+
+  if (first.isEmpty) {
+    return '';
+  }
+
+  if (initial.isEmpty) {
+    return first;
+  }
+
+  return '$first $initial';
+}

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../../../core/display_name.dart';
 import '../data/ride_repository.dart';
 import '../domain/assigned_driver.dart';
 import '../domain/driver_location.dart';
@@ -60,6 +61,16 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
   String? _startCodeError;
 
   bool _assignedAcknowledged = false;
+
+  // R4.3E: última foto válida del Driver asignado, en memoria únicamente
+  // (nunca persistida). El capability token del Backend rota en cada
+  // respuesta (STORAGE-R2.1), así que `photoUrl` cambia de string en
+  // cada poll aunque sea la misma fotografía; un null/URL inválida
+  // transitorios no deben tumbar una foto ya mostrada del mismo Driver
+  // en el mismo ride. Se resetea al cambiar de ride o de Driver.
+  String? _stableDriverPhotoRideId;
+  String? _stableDriverPhotoProfileId;
+  Uri? _stableDriverPhotoUri;
 
   @override
   void initState() {
@@ -121,6 +132,7 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
         _ride = ride;
         _loading = false;
         _error = null;
+        _updateStableDriverPhoto(ride);
       });
 
       if (ride.status == 'SEARCHING_DRIVER') {
@@ -196,6 +208,44 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
 
   bool _canApplyGeneration(int generation) {
     return mounted && !_navigatingAway && generation == _stateGeneration;
+  }
+
+  /// R4.3E: recalcula `_stableDriverPhotoUri` para el ride/Driver
+  /// actuales. Debe llamarse dentro del mismo `setState` que asigna
+  /// `_ride`, para que ambos avancen juntos.
+  ///
+  /// Reglas (decisión de producto, solo memoria — nunca disco):
+  /// - cambia el ride -> reset total;
+  /// - cambia el Driver (o ya no hay Driver) -> reset total;
+  /// - mismo Driver + `photoUrl` válida nueva -> reemplaza;
+  /// - mismo Driver + `photoUrl` null/inválida transitoria -> conserva
+  ///   la última válida (no la tumba).
+  void _updateStableDriverPhoto(PassengerRide ride) {
+    if (ride.id != _stableDriverPhotoRideId) {
+      _stableDriverPhotoRideId = ride.id;
+      _stableDriverPhotoProfileId = null;
+      _stableDriverPhotoUri = null;
+    }
+
+    final driver = ride.driver;
+
+    if (driver == null) {
+      _stableDriverPhotoProfileId = null;
+      _stableDriverPhotoUri = null;
+      return;
+    }
+
+    if (driver.profileId != _stableDriverPhotoProfileId) {
+      _stableDriverPhotoProfileId = driver.profileId;
+      _stableDriverPhotoUri = _validPhotoUri(driver.photoUrl);
+      return;
+    }
+
+    final freshUri = _validPhotoUri(driver.photoUrl);
+
+    if (freshUri != null) {
+      _stableDriverPhotoUri = freshUri;
+    }
   }
 
   Future<void> _loadRideOffers(String rideId, {required int generation}) async {
@@ -662,7 +712,7 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
         return 'Tu conductor está en camino';
 
       case 'DRIVER_ARRIVED':
-        return 'Tu conductor llegó';
+        return 'Tu conductor ya llegó';
 
       case 'IN_PROGRESS':
         return 'Viaje en curso';
@@ -1661,8 +1711,8 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
         break;
 
       case 'DRIVER_ARRIVED':
-        title = 'Tu conductor llegó';
-        subtitle = 'Muéstrale tu código para iniciar el viaje.';
+        title = 'Tu conductor ya llegó';
+        subtitle = 'Identifica a tu conductor antes de subir.';
         icon = Icons.location_on;
         break;
 
@@ -1729,19 +1779,42 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
     );
   }
 
+  /// Valida `photoUrl` como una URL http(s) usable — nunca presiona una
+  /// URL vacía/malformada, ni la ofrece como tappable en R4.3C.
+  Uri? _validPhotoUri(String? rawPhotoUrl) {
+    final photoUrl = rawPhotoUrl?.trim();
+
+    if (photoUrl == null || photoUrl.isEmpty) {
+      return null;
+    }
+
+    final uri = Uri.tryParse(photoUrl);
+
+    if (uri == null || uri.host.isEmpty) {
+      return null;
+    }
+
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      return null;
+    }
+
+    return uri;
+  }
+
   Widget _buildAssignedDriverAvatar(AssignedDriver driver) {
-    final photoUrl = driver.photoUrl?.trim();
-    final photoUri = photoUrl == null || photoUrl.isEmpty
-        ? null
-        : Uri.tryParse(photoUrl);
+    const size = 56.0;
+    // R4.3E: usa la última foto válida en memoria del MISMO Driver/ride
+    // (no `driver.photoUrl` crudo) para no parpadear cuando el
+    // capability token rota entre polls — ver `_updateStableDriverPhoto`.
+    final validPhotoUri = _stableDriverPhotoUri;
 
     Widget fallback() {
       final firstName = driver.firstName.trim();
       final initial = firstName.isEmpty ? null : firstName[0].toUpperCase();
 
       return Container(
-        width: 56,
-        height: 56,
+        width: size,
+        height: size,
         alignment: Alignment.center,
         decoration: const BoxDecoration(
           color: Color(0xFFE7F1E8),
@@ -1760,29 +1833,114 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
       );
     }
 
-    final hasValidPhoto =
-        photoUri != null &&
-        (photoUri.scheme == 'http' || photoUri.scheme == 'https') &&
-        photoUri.host.isNotEmpty;
-
-    if (!hasValidPhoto) {
+    if (validPhotoUri == null) {
       return fallback();
     }
 
     return ClipOval(
       child: Image.network(
-        photoUrl!,
-        width: 56,
-        height: 56,
+        validPhotoUri.toString(),
+        key: ValueKey('assigned-driver-avatar-image-${driver.profileId}'),
+        // R4.3E: conserva el último frame renderizado mientras carga un
+        // `photoUrl` nuevo del mismo Driver (rotación de capability
+        // token), en vez de mostrar blanco/placeholder de golpe.
+        gaplessPlayback: true,
+        width: size,
+        height: size,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => fallback(),
       ),
     );
   }
 
-  Widget _buildAssignedDriverCard(AssignedDriver driver) {
+  /// Preview ampliado de la foto del Driver (R4.3C): solo se ofrece
+  /// cuando existe una foto real y `ride.status == DRIVER_ARRIVED`.
+  /// `showDialog` liviano, sin ruta nueva — cerrar (X, back Android o
+  /// tap fuera) regresa exactamente al mismo ride en DRIVER_ARRIVED,
+  /// sin refrescar/renavegar.
+  void _showDriverPhotoViewer(String photoUrl, String driverDisplayName) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        return Dialog(
+          key: const ValueKey('driver-photo-viewer'),
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                alignment: Alignment.topRight,
+                children: [
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(dialogContext).size.width * 0.85,
+                      maxHeight:
+                          MediaQuery.of(dialogContext).size.height * 0.6,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Image.network(
+                        photoUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            key: const ValueKey('driver-photo-viewer-error'),
+                            width: 220,
+                            height: 220,
+                            color: Colors.white,
+                            alignment: Alignment.center,
+                            padding: const EdgeInsets.all(24),
+                            child: const Text(
+                              'No se pudo cargar la foto',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: _secondaryText),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: IconButton(
+                      key: const ValueKey('driver-photo-viewer-close'),
+                      icon: const Icon(Icons.close, color: Colors.white),
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black45,
+                        shape: const CircleBorder(),
+                      ),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                    ),
+                  ),
+                ],
+              ),
+              if (driverDisplayName.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  driverDisplayName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAssignedDriverCard(AssignedDriver driver, {bool isArrived = false}) {
     final vehicle = driver.vehicle;
-    final firstName = driver.firstName.trim();
+    final displayName = displayCompactNameFromInitial(
+      driver.firstName,
+      driver.lastNameInitial,
+    );
     final plate = vehicle?.plate.trim() ?? '';
     final vehicleDescription = vehicle == null
         ? ''
@@ -1791,6 +1949,24 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
             vehicle.model.trim(),
             vehicle.color.trim(),
           ].where((value) => value.isNotEmpty).join(' · ');
+
+    // R4.3E: tappability y viewer usan la MISMA foto estable que ya
+    // muestra la tarjeta (`_stableDriverPhotoUri`), nunca una lectura
+    // separada de `driver.photoUrl` — así "foto visible -> tap -> viewer
+    // de ESA foto" se mantiene cierto incluso durante rotación de
+    // capability token.
+    final validPhotoUri = _stableDriverPhotoUri;
+    final photoTappable = isArrived && validPhotoUri != null;
+
+    final avatar = _buildAssignedDriverAvatar(driver);
+    final avatarWidget = photoTappable
+        ? GestureDetector(
+            key: const ValueKey('assigned-driver-avatar-tap'),
+            onTap: () =>
+                _showDriverPhotoViewer(validPhotoUri.toString(), displayName),
+            child: avatar,
+          )
+        : avatar;
 
     return Container(
       key: const ValueKey('assigned-driver-card'),
@@ -1803,15 +1979,15 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _buildAssignedDriverAvatar(driver),
+          avatarWidget,
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (firstName.isNotEmpty)
+                if (displayName.isNotEmpty)
                   Text(
-                    firstName,
+                    displayName,
                     key: const ValueKey('assigned-driver-name'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -2296,7 +2472,10 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
                         _buildTrackingStatusCard(ride),
                         if (driver != null) ...[
                           const SizedBox(height: 16),
-                          _buildAssignedDriverCard(driver),
+                          _buildAssignedDriverCard(
+                            driver,
+                            isArrived: ride.status == 'DRIVER_ARRIVED',
+                          ),
                         ],
                         const SizedBox(height: 16),
                         _buildAgreedFareCard(ride),
