@@ -58,7 +58,11 @@ class _CompleteProfileScreenState
         return;
       }
 
-      context.go('/home');
+      // No asumimos "listo" localmente: volvemos al resolver de
+      // sesión (Splash) para que reconsulte Backend y derive la ruta
+      // real a partir del perfil recién creado — mismo mecanismo que
+      // login/registro/reapertura de la app.
+      context.go('/splash');
     } on DioException catch (error) {
       if (!mounted) {
         return;
@@ -68,8 +72,9 @@ class _CompleteProfileScreenState
           'No se pudo crear tu perfil.';
 
       if (error.response?.statusCode == 409) {
-        // El perfil ya existe.
-        context.go('/home');
+        // El perfil ya existe (p.ej. doble envío) — igual pasa por el
+        // resolver en vez de asumir a dónde ir.
+        context.go('/splash');
         return;
       }
 

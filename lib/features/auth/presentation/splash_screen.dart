@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import '../../passenger/data/passenger_profile_repository.dart';
 import '../../ride/data/ride_repository.dart';
 import '../data/auth_repository.dart';
+import '../domain/passenger_session_state.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -123,7 +124,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         return;
       }
 
-      await ref.read(passengerProfileRepositoryProvider).getMyProfile();
+      final profile = await ref
+          .read(passengerProfileRepositoryProvider)
+          .getMyProfile();
 
       if (!mounted) {
         return;
@@ -139,12 +142,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         return;
       }
 
-      if (activeRide != null) {
-        context.go('/ride/${activeRide.id}');
-        return;
-      }
+      final sessionState = resolvePassengerSessionState(
+        hasProfile: profile != null,
+        activeRideId: activeRide?.id,
+      );
 
-      context.go('/home');
+      context.go(routeForPassengerSessionState(sessionState));
     } on DioException catch (error) {
       debugPrint(
         'Error HTTP restaurando sesión del pasajero: '

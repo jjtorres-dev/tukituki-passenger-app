@@ -115,53 +115,166 @@ void main() {
     expect(rideRepository.getActiveRideCalls, 0);
   });
 
-  testWidgets('Perfil 404 y sin ride continúa a home', (tester) async {
-    final authRepository = _FakeAuthRepository(
-      user: _user(isPhoneVerified: false),
-    );
-    final profileRepository = _FakePassengerProfileRepository(profile: null);
-    final rideRepository = _FakeRideRepository();
-    final router = _splashRouter();
-    addTearDown(router.dispose);
+  testWidgets(
+    'Perfil 404 y sin ride va a completar perfil (R4.2 — identidad '
+    'obligatoria antes de Home)',
+    (tester) async {
+      final authRepository = _FakeAuthRepository(
+        user: _user(isPhoneVerified: false),
+      );
+      final profileRepository = _FakePassengerProfileRepository(
+        profile: null,
+      );
+      final rideRepository = _FakeRideRepository();
+      final router = _splashRouter();
+      addTearDown(router.dispose);
 
-    await _pumpSplash(
-      tester,
-      router: router,
-      authRepository: authRepository,
-      profileRepository: profileRepository,
-      rideRepository: rideRepository,
-    );
+      await _pumpSplash(
+        tester,
+        router: router,
+        authRepository: authRepository,
+        profileRepository: profileRepository,
+        rideRepository: rideRepository,
+      );
 
-    expect(router.routeInformationProvider.value.uri.path, '/home');
-    expect(profileRepository.getMyProfileCalls, 1);
-    expect(rideRepository.getActiveRideCalls, 1);
-    expect(authRepository.clearSessionCalls, 0);
-  });
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/complete-profile',
+      );
+      expect(find.text('PROFILE_DESTINATION'), findsOneWidget);
+      expect(profileRepository.getMyProfileCalls, 1);
+      expect(rideRepository.getActiveRideCalls, 1);
+      expect(authRepository.clearSessionCalls, 0);
+    },
+  );
 
-  testWidgets('Perfil 404 y ride activo continúa a ride por id', (
-    tester,
-  ) async {
-    final authRepository = _FakeAuthRepository(
-      user: _user(isPhoneVerified: false),
-    );
-    final profileRepository = _FakePassengerProfileRepository(profile: null);
-    final rideRepository = _FakeRideRepository(activeRide: _ride());
-    final router = _splashRouter();
-    addTearDown(router.dispose);
+  testWidgets(
+    'Perfil 404 pero con ride activo prioriza el ride sobre el gate de '
+    'identidad (legacy: no bloquea a un Passenger ya en medio de un '
+    'viaje)',
+    (tester) async {
+      final authRepository = _FakeAuthRepository(
+        user: _user(isPhoneVerified: false),
+      );
+      final profileRepository = _FakePassengerProfileRepository(
+        profile: null,
+      );
+      final rideRepository = _FakeRideRepository(activeRide: _ride());
+      final router = _splashRouter();
+      addTearDown(router.dispose);
 
-    await _pumpSplash(
-      tester,
-      router: router,
-      authRepository: authRepository,
-      profileRepository: profileRepository,
-      rideRepository: rideRepository,
-    );
+      await _pumpSplash(
+        tester,
+        router: router,
+        authRepository: authRepository,
+        profileRepository: profileRepository,
+        rideRepository: rideRepository,
+      );
 
-    expect(router.routeInformationProvider.value.uri.path, '/ride/ride-active');
-    expect(find.text('RIDE_DESTINATION ride-active'), findsOneWidget);
-    expect(rideRepository.getActiveRideCalls, 1);
-    expect(authRepository.clearSessionCalls, 0);
-  });
+      expect(router.routeInformationProvider.value.uri.path, '/ride/ride-active');
+      expect(find.text('RIDE_DESTINATION ride-active'), findsOneWidget);
+      expect(rideRepository.getActiveRideCalls, 1);
+      expect(authRepository.clearSessionCalls, 0);
+    },
+  );
+
+  testWidgets(
+    'Perfil ya completo (con firstName/lastName) continúa a home — '
+    'ningún dato de perfil se descarta silenciosamente',
+    (tester) async {
+      final authRepository = _FakeAuthRepository(
+        user: _user(isPhoneVerified: true),
+      );
+      final profileRepository = _FakePassengerProfileRepository(
+        profile: const {
+          'id': 'profile-1',
+          'firstName': 'María',
+          'lastName': 'Rodríguez',
+        },
+      );
+      final rideRepository = _FakeRideRepository();
+      final router = _splashRouter();
+      addTearDown(router.dispose);
+
+      await _pumpSplash(
+        tester,
+        router: router,
+        authRepository: authRepository,
+        profileRepository: profileRepository,
+        rideRepository: rideRepository,
+      );
+
+      expect(router.routeInformationProvider.value.uri.path, '/home');
+      expect(profileRepository.getMyProfileCalls, 1);
+      expect(rideRepository.getActiveRideCalls, 1);
+    },
+  );
+
+  testWidgets(
+    'Perfil completo y con ride activo va al ride, no a home (las 4 '
+    'combinaciones de hasProfile/activeRide quedan cubiertas a nivel '
+    'de integración, no solo en el resolver puro)',
+    (tester) async {
+      final authRepository = _FakeAuthRepository(
+        user: _user(isPhoneVerified: true),
+      );
+      final profileRepository = _FakePassengerProfileRepository(
+        profile: const {
+          'id': 'profile-1',
+          'firstName': 'María',
+          'lastName': 'Rodríguez',
+        },
+      );
+      final rideRepository = _FakeRideRepository(activeRide: _ride());
+      final router = _splashRouter();
+      addTearDown(router.dispose);
+
+      await _pumpSplash(
+        tester,
+        router: router,
+        authRepository: authRepository,
+        profileRepository: profileRepository,
+        rideRepository: rideRepository,
+      );
+
+      expect(router.routeInformationProvider.value.uri.path, '/ride/ride-active');
+      expect(find.text('RIDE_DESTINATION ride-active'), findsOneWidget);
+      expect(profileRepository.getMyProfileCalls, 1);
+      expect(rideRepository.getActiveRideCalls, 1);
+    },
+  );
+
+  testWidgets(
+    'No se puede volver de Sobre-ti a Home con el botón atrás — Splash '
+    'nunca deja a Home en la pila cuando el gate de identidad aplica',
+    (tester) async {
+      final authRepository = _FakeAuthRepository(
+        user: _user(isPhoneVerified: false),
+      );
+      final profileRepository = _FakePassengerProfileRepository(
+        profile: null,
+      );
+      final rideRepository = _FakeRideRepository();
+      final router = _splashRouter();
+      addTearDown(router.dispose);
+
+      await _pumpSplash(
+        tester,
+        router: router,
+        authRepository: authRepository,
+        profileRepository: profileRepository,
+        rideRepository: rideRepository,
+      );
+
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/complete-profile',
+      );
+
+      final context = tester.element(find.text('PROFILE_DESTINATION'));
+      expect(Navigator.of(context).canPop(), isFalse);
+    },
+  );
 
   for (final failure in <(String, DioException)>[
     (
@@ -181,6 +294,11 @@ void main() {
           user: _user(isPhoneVerified: false),
         );
         final profileRepository = _FakePassengerProfileRepository(
+          profile: const {
+            'id': 'profile-1',
+            'firstName': 'Juan',
+            'lastName': 'Pérez',
+          },
           error: failure.$2,
         );
         final rideRepository = _FakeRideRepository();
