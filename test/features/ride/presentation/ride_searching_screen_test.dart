@@ -2071,6 +2071,393 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  group('R4.4B: interpolación visual del marker del Driver', () {
+    const pointA = LatLng(-6.4879, -76.3601);
+    const pointB = LatLng(-6.4869, -76.3596); // ~124m de A, bajo el umbral de 300m
+    const pointFar = LatLng(-6.4700, -76.3400); // muy por encima de 300m de A
+
+    testWidgets('primera posición válida se muestra directa, sin animar', (
+      tester,
+    ) async {
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async => _ride(
+          status: 'DRIVER_ARRIVING',
+          driver: _assignedDriver(),
+          driverLocation: DriverLocation(
+            latitude: pointA.latitude,
+            longitude: pointA.longitude,
+          ),
+        ),
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(_driverMarkerPosition(tester), pointA);
+    });
+
+    testWidgets('A→B anima suavemente: sigue en A justo tras el update, '
+        'pasa por un punto intermedio y llega exactamente a B', (
+      tester,
+    ) async {
+      var call = 0;
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async {
+          call++;
+          final point = call == 1 ? pointA : pointB;
+          return _ride(
+            status: 'DRIVER_ARRIVING',
+            driver: _assignedDriver(),
+            driverLocation: DriverLocation(
+              latitude: point.latitude,
+              longitude: point.longitude,
+            ),
+          );
+        },
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(_driverMarkerPosition(tester), pointA);
+
+      // Dispara el poll #2 (Timer.periodic de 3s) -> nueva posición B.
+      await tester.pump(const Duration(seconds: 3));
+      await _flushAsync(tester);
+
+      // Justo tras recibir B, la animación recién empieza: el marker
+      // sigue prácticamente en A, no salta directo a B.
+      final justAfterUpdate = _driverMarkerPosition(tester)!;
+      expect(justAfterUpdate.latitude, closeTo(pointA.latitude, 0.0003));
+      expect(justAfterUpdate.longitude, closeTo(pointA.longitude, 0.0003));
+
+      // Punto intermedio: ni A ni B.
+      await _pumpInSteps(tester, const Duration(milliseconds: 1400));
+      final midpoint = _driverMarkerPosition(tester)!;
+      expect(midpoint.latitude, greaterThan(pointA.latitude));
+      expect(midpoint.latitude, lessThan(pointB.latitude));
+      expect(midpoint.longitude, greaterThan(pointA.longitude));
+      expect(midpoint.longitude, lessThan(pointB.longitude));
+
+      // La animación llega exactamente a B.
+      await _pumpInSteps(tester, const Duration(milliseconds: 1600));
+      final finalPosition = _driverMarkerPosition(tester)!;
+      expect(finalPosition.latitude, closeTo(pointB.latitude, 0.00001));
+      expect(finalPosition.longitude, closeTo(pointB.longitude, 0.00001));
+    });
+
+    testWidgets(
+      'nueva posición C mientras A→B sigue animando: no salta hacia atrás a '
+      'B, continúa desde la posición visual actual y termina en C',
+      (tester) async {
+        const pointC = LatLng(-6.4859, -76.3591);
+
+        var call = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            call++;
+
+            if (call == 1) {
+              return _ride(
+                status: 'DRIVER_ARRIVING',
+                driver: _assignedDriver(),
+                driverLocation: DriverLocation(
+                  latitude: pointA.latitude,
+                  longitude: pointA.longitude,
+                ),
+              );
+            }
+
+            if (call == 2) {
+              // Retraso de red deliberado: hace que la animación A→B
+              // arranque tarde y siga activa cuando llegue el poll #3.
+              await Future<void>.delayed(const Duration(milliseconds: 500));
+
+              return _ride(
+                status: 'DRIVER_ARRIVING',
+                driver: _assignedDriver(),
+                driverLocation: DriverLocation(
+                  latitude: pointB.latitude,
+                  longitude: pointB.longitude,
+                ),
+              );
+            }
+
+            return _ride(
+              status: 'DRIVER_ARRIVING',
+              driver: _assignedDriver(),
+              driverLocation: DriverLocation(
+                latitude: pointC.latitude,
+                longitude: pointC.longitude,
+              ),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        expect(_driverMarkerPosition(tester), pointA);
+
+        // Poll #2 (t=3000ms): arranca con retraso de red de 500ms.
+        await tester.pump(const Duration(seconds: 3));
+        await _pumpInSteps(tester, const Duration(milliseconds: 500));
+        await _flushAsync(tester);
+
+        // La animación A→B ya debería haber arrancado.
+        await _pumpInSteps(tester, const Duration(milliseconds: 1500));
+        final beforeInterruption = _driverMarkerPosition(tester)!;
+        expect(beforeInterruption, isNot(pointA));
+        expect(beforeInterruption, isNot(pointB));
+
+        // Poll #3 (siguiente tick natural del Timer, t=6000ms): llega C
+        // mientras la animación A→B sigue en curso (arrancó en t=3500,
+        // dura 2800ms -> termina en t=6300).
+        await _pumpInSteps(tester, const Duration(milliseconds: 1000));
+        await _flushAsync(tester);
+
+        // No debe haber saltado hacia atrás a B.
+        final justAfterC = _driverMarkerPosition(tester)!;
+        expect(justAfterC, isNot(pointB));
+
+        // Termina en C, no en B.
+        await _pumpInSteps(tester, const Duration(milliseconds: 2900));
+        final finalPosition = _driverMarkerPosition(tester)!;
+        expect(finalPosition.latitude, closeTo(pointC.latitude, 0.00001));
+        expect(finalPosition.longitude, closeTo(pointC.longitude, 0.00001));
+      },
+    );
+
+    testWidgets(
+      'la misma coordenada en reposo no reinicia animación ni produce '
+      'flicker',
+      (tester) async {
+        var call = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            call++;
+            final point = call == 1 ? pointA : pointB;
+            return _ride(
+              status: 'DRIVER_ARRIVING',
+              driver: _assignedDriver(),
+              driverLocation: DriverLocation(
+                latitude: point.latitude,
+                longitude: point.longitude,
+              ),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        // Deja completar la animación A→B.
+        await tester.pump(const Duration(seconds: 3));
+        await _pumpInSteps(tester, const Duration(milliseconds: 3000));
+        final settled = _driverMarkerPosition(tester)!;
+        expect(settled.latitude, closeTo(pointB.latitude, 0.00001));
+
+        // Poll #3 (mismo B): no debe mover el marker ni lanzar excepciones.
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+
+        final afterSameCoordinate = _driverMarkerPosition(tester)!;
+        expect(afterSameCoordinate.latitude, closeTo(pointB.latitude, 0.00001));
+        expect(
+          afterSameCoordinate.longitude,
+          closeTo(pointB.longitude, 0.00001),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'driverLocation null transitorio conserva el último marker válido',
+      (tester) async {
+        var call = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            call++;
+
+            return _ride(
+              status: 'DRIVER_ARRIVING',
+              driver: _assignedDriver(),
+              originLatitude: -6.4877,
+              originLongitude: -76.3599,
+              destinationLatitude: -6.4812,
+              destinationLongitude: -76.3651,
+              driverLocation: call == 1
+                  ? DriverLocation(
+                      latitude: pointA.latitude,
+                      longitude: pointA.longitude,
+                    )
+                  : null,
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        expect(_driverMarkerPosition(tester), pointA);
+
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+
+        expect(_driverMarkerPosition(tester), pointA);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('cambio de Driver resetea la animación: nueva posición directa', (
+      tester,
+    ) async {
+      const otherDriverPoint = LatLng(-6.5000, -76.3700);
+
+      var call = 0;
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async {
+          call++;
+
+          return _ride(
+            status: 'DRIVER_ARRIVING',
+            driver: _assignedDriver(
+              profileId: call == 1 ? 'driver-1' : 'driver-2',
+            ),
+            driverLocation: DriverLocation(
+              latitude: call == 1 ? pointA.latitude : otherDriverPoint.latitude,
+              longitude: call == 1
+                  ? pointA.longitude
+                  : otherDriverPoint.longitude,
+            ),
+          );
+        },
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(_driverMarkerPosition(tester), pointA);
+
+      await tester.pump(const Duration(seconds: 3));
+      await _flushAsync(tester);
+
+      // Directo al nuevo Driver, sin interpolar desde el anterior.
+      expect(_driverMarkerPosition(tester), otherDriverPoint);
+    });
+
+    testWidgets('cambio de ride resetea la animación: nueva posición directa', (
+      tester,
+    ) async {
+      const otherRidePoint = LatLng(-6.4600, -76.3300);
+
+      var call = 0;
+      final repository = _FakeRideRepository(
+        onGetActiveRide: () async {
+          call++;
+
+          return _ride(
+            id: call == 1 ? 'ride-real' : 'ride-other',
+            status: 'DRIVER_ARRIVING',
+            driver: _assignedDriver(),
+            driverLocation: DriverLocation(
+              latitude: call == 1 ? pointA.latitude : otherRidePoint.latitude,
+              longitude: call == 1
+                  ? pointA.longitude
+                  : otherRidePoint.longitude,
+            ),
+          );
+        },
+        onGetRideOffers: (_) async => const [],
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      expect(_driverMarkerPosition(tester), pointA);
+
+      await tester.pump(const Duration(seconds: 3));
+      await _flushAsync(tester);
+
+      // Directo al nuevo ride, no conserva marker del ride anterior.
+      expect(_driverMarkerPosition(tester), otherRidePoint);
+    });
+
+    testWidgets(
+      'salto mayor a 300m hace snap directo en vez de animar lentamente',
+      (tester) async {
+        var call = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            call++;
+            final point = call == 1 ? pointA : pointFar;
+            return _ride(
+              status: 'DRIVER_ARRIVING',
+              driver: _assignedDriver(),
+              driverLocation: DriverLocation(
+                latitude: point.latitude,
+                longitude: point.longitude,
+              ),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+        addTearDown(() => _disposeScreen(tester));
+
+        expect(_driverMarkerPosition(tester), pointA);
+
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+
+        // Snap inmediato: no hace falta esperar la duración de la
+        // animación para llegar al punto lejano.
+        expect(_driverMarkerPosition(tester), pointFar);
+      },
+    );
+
+    testWidgets(
+      'dispose durante una animación en curso no deja Timer/Ticker pendiente',
+      (tester) async {
+        var call = 0;
+        final repository = _FakeRideRepository(
+          onGetActiveRide: () async {
+            call++;
+            final point = call == 1 ? pointA : pointB;
+            return _ride(
+              status: 'DRIVER_ARRIVING',
+              driver: _assignedDriver(),
+              driverLocation: DriverLocation(
+                latitude: point.latitude,
+                longitude: point.longitude,
+              ),
+            );
+          },
+          onGetRideOffers: (_) async => const [],
+        );
+
+        await _pumpScreen(tester, repository);
+
+        await tester.pump(const Duration(seconds: 3));
+        await _pumpInSteps(tester, const Duration(milliseconds: 800));
+
+        // Dispose a mitad de la animación A→B: si el AnimationController
+        // o el Timer de polling no se cancelan correctamente, el binding
+        // de test detecta timers/tickers colgados al terminar el test.
+        await _disposeScreen(tester);
+
+        expect(tester.takeException(), isNull);
+      },
+    );
+  });
 }
 
 class _FakeRideRepository extends RideRepository {
@@ -2202,6 +2589,41 @@ Future<void> _flushAsync(WidgetTester tester) async {
   for (var i = 0; i < 8; i++) {
     await tester.pump(const Duration(milliseconds: 1));
   }
+}
+
+/// R4.4B: avanza el reloj virtual del test en pasos pequeños en vez de
+/// un solo salto grande, para que el `AnimationController` del marker
+/// del Driver progrese de forma realista (frame a frame) y para no
+/// perder ticks del `Timer.periodic` de polling que caigan dentro del
+/// rango.
+Future<void> _pumpInSteps(
+  WidgetTester tester,
+  Duration total, {
+  Duration step = const Duration(milliseconds: 50),
+}) async {
+  var remaining = total;
+
+  while (remaining > Duration.zero) {
+    final chunk = remaining > step ? step : remaining;
+    await tester.pump(chunk);
+    remaining -= chunk;
+  }
+}
+
+/// R4.4B: posición actual del marker `ride-driver` en el
+/// `GoogleMap` real del test, o `null` si no existe.
+LatLng? _driverMarkerPosition(WidgetTester tester) {
+  final map = tester.widget<GoogleMap>(
+    find.byKey(const ValueKey('ride-search-google-map')),
+  );
+
+  for (final marker in map.markers) {
+    if (marker.markerId == const MarkerId('ride-driver')) {
+      return marker.position;
+    }
+  }
+
+  return null;
 }
 
 Future<GoRouter> _pumpRoutedScreen(

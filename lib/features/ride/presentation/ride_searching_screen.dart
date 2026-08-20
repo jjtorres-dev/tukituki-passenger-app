@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -2391,6 +2392,8 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
                       origin: origin,
                       destination: destination,
                       driverLocation: driverPoint,
+                      rideId: ride.id,
+                      driverProfileId: driver?.profileId,
                     ),
                   ),
                 ),
@@ -2455,6 +2458,8 @@ class _RideSearchingScreenState extends ConsumerState<RideSearchingScreen>
                       origin: origin,
                       destination: destination,
                       driverLocation: driverPoint,
+                      rideId: ride.id,
+                      driverProfileId: driver?.profileId,
                     ),
                   ),
                 ),
@@ -3175,6 +3180,8 @@ class _RideRouteMap extends StatefulWidget {
     required this.origin,
     required this.destination,
     this.driverLocation,
+    this.rideId,
+    this.driverProfileId,
   });
 
   final LatLng? origin;
@@ -3189,13 +3196,62 @@ class _RideRouteMap extends StatefulWidget {
    */
   final LatLng? driverLocation;
 
+  // R4.4B: identifican a qué ride/Driver pertenece `driverLocation`,
+  // para poder resetear la animación del marker cuando cambia
+  // cualquiera de los dos (ver _RideRouteMapState._handleDriverLocationUpdate).
+  final String? rideId;
+  final String? driverProfileId;
+
   @override
   State<_RideRouteMap> createState() => _RideRouteMapState();
 }
 
-class _RideRouteMapState extends State<_RideRouteMap> {
+class _RideRouteMapState extends State<_RideRouteMap>
+    with SingleTickerProviderStateMixin {
+  // R4.4B: duración objetivo de la animación visual del marker del
+  // Driver — casi todo el intervalo de polling (3000ms) sin solaparse
+  // de forma continua con el siguiente poll.
+  static const Duration _driverMarkerAnimationDuration = Duration(
+    milliseconds: 2800,
+  );
+
+  // R4.4B: hardening técnico ante un salto de GPS evidente (teleport /
+  // reconexión). Ajustable tras prueba física.
+  static const double _driverMarkerLargeJumpMetersThreshold = 300;
+
+  // R4.4B: diferencia de coordenada por debajo de la cual se considera
+  // "la misma posición" y no se reinicia la animación (evita
+  // ticker/flicker innecesarios por ruido de precisión numérica).
+  static const double _driverMarkerSameCoordinateDegreesThreshold = 0.0000005;
+
   GoogleMapController? _controller;
   String? _lastCameraGeometry;
+
+  late final AnimationController _driverMarkerAnimationController;
+
+  // R4.4B: posición realmente dibujada del marker del Driver — puede
+  // ser un punto intermedio mientras se anima de A hacia B.
+  LatLng? _displayDriverPosition;
+  LatLng? _animationStartPosition;
+  LatLng? _animationTargetPosition;
+  String? _currentRideId;
+  String? _currentDriverProfileId;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _driverMarkerAnimationController =
+        AnimationController(
+          vsync: this,
+          duration: _driverMarkerAnimationDuration,
+        )..addListener(_onDriverMarkerAnimationTick);
+
+    _currentRideId = widget.rideId;
+    _currentDriverProfileId = widget.driverProfileId;
+    _displayDriverPosition = widget.driverLocation;
+    _animationTargetPosition = widget.driverLocation;
+  }
 
   @override
   void didUpdateWidget(covariant _RideRouteMap oldWidget) {
@@ -3205,12 +3261,127 @@ class _RideRouteMapState extends State<_RideRouteMap> {
         oldWidget.destination != widget.destination) {
       _scheduleCameraUpdate();
     }
+
+    _handleDriverLocationUpdate();
   }
 
   @override
   void dispose() {
+    _driverMarkerAnimationController
+      ..removeListener(_onDriverMarkerAnimationTick)
+      ..dispose();
     _controller?.dispose();
     super.dispose();
+  }
+
+  /// R4.4B: decide cómo reaccionar a un nuevo `widget.driverLocation`
+  /// tras un rebuild (poll cada 3s). Reglas (ver AGENTS.md R4.4B):
+  /// - cambia rideId o driverProfileId -> reset total, primera
+  ///   posición del nuevo Driver/ride se muestra directa, sin animar;
+  /// - `driverLocation` null transitorio (mismo ride+Driver) -> se
+  ///   conserva el último marker válido, nunca se mueve a origin/null;
+  /// - primera posición válida para el ride+Driver actual -> directa;
+  /// - misma coordenada (o diferencia insignificante) que el target
+  ///   actual -> no reinicia la animación;
+  /// - salto > 300m respecto a la posición visual actual -> snap
+  ///   directo (hardening ante teleport de GPS), sin animar;
+  /// - resto de los casos -> anima linealmente desde la posición
+  ///   visual actual (no desde el target previo, para no “saltar hacia
+  ///   atrás” si llega una C mientras se animaba A→B) hacia la nueva
+  ///   posición.
+  void _handleDriverLocationUpdate() {
+    final rideId = widget.rideId;
+    final driverProfileId = widget.driverProfileId;
+    final newLocation = widget.driverLocation;
+
+    final identityChanged =
+        rideId != _currentRideId || driverProfileId != _currentDriverProfileId;
+
+    if (identityChanged) {
+      _driverMarkerAnimationController.stop();
+      _currentRideId = rideId;
+      _currentDriverProfileId = driverProfileId;
+      _animationStartPosition = null;
+      _animationTargetPosition = newLocation;
+
+      setState(() {
+        _displayDriverPosition = newLocation;
+      });
+
+      return;
+    }
+
+    if (newLocation == null) {
+      // Null transitorio para el mismo ride+Driver: conservar el
+      // último marker válido, no mover a origin/0,0/null.
+      return;
+    }
+
+    final currentDisplay = _displayDriverPosition;
+
+    if (currentDisplay == null) {
+      // Primera posición válida de este ride+Driver: directa.
+      _animationStartPosition = null;
+      _animationTargetPosition = newLocation;
+
+      setState(() {
+        _displayDriverPosition = newLocation;
+      });
+
+      return;
+    }
+
+    final currentTarget = _animationTargetPosition ?? currentDisplay;
+
+    if (!_isMeaningfullyDifferentCoordinate(currentTarget, newLocation)) {
+      return;
+    }
+
+    if (_driverMarkerDistanceMeters(currentDisplay, newLocation) >
+        _driverMarkerLargeJumpMetersThreshold) {
+      _driverMarkerAnimationController.stop();
+      _animationStartPosition = null;
+      _animationTargetPosition = newLocation;
+
+      setState(() {
+        _displayDriverPosition = newLocation;
+      });
+
+      return;
+    }
+
+    _animationStartPosition = currentDisplay;
+    _animationTargetPosition = newLocation;
+
+    _driverMarkerAnimationController
+      ..stop()
+      ..value = 0
+      ..forward();
+  }
+
+  void _onDriverMarkerAnimationTick() {
+    final start = _animationStartPosition;
+    final target = _animationTargetPosition;
+
+    if (start == null || target == null || !mounted) {
+      return;
+    }
+
+    final t = _driverMarkerAnimationController.value;
+
+    setState(() {
+      _displayDriverPosition = LatLng(
+        start.latitude + (target.latitude - start.latitude) * t,
+        start.longitude + (target.longitude - start.longitude) * t,
+      );
+    });
+  }
+
+  bool _isMeaningfullyDifferentCoordinate(LatLng first, LatLng second) {
+    return (first.latitude - second.latitude).abs() >
+            _driverMarkerSameCoordinateDegreesThreshold ||
+        (first.longitude - second.longitude).abs() >
+            _driverMarkerSameCoordinateDegreesThreshold;
   }
 
   String get _geometrySignature {
@@ -3232,7 +3403,7 @@ class _RideRouteMapState extends State<_RideRouteMap> {
       );
     }
 
-    return origin ?? destination ?? widget.driverLocation!;
+    return origin ?? destination ?? _displayDriverPosition ?? widget.driverLocation!;
   }
 
   bool _areDistinct(LatLng first, LatLng second) {
@@ -3316,10 +3487,10 @@ class _RideRouteMapState extends State<_RideRouteMap> {
           ),
           infoWindow: const InfoWindow(title: 'Destino'),
         ),
-      if (widget.driverLocation != null)
+      if (_displayDriverPosition != null)
         Marker(
           markerId: const MarkerId('ride-driver'),
-          position: widget.driverLocation!,
+          position: _displayDriverPosition!,
           icon: BitmapDescriptor.defaultMarkerWithHue(
             BitmapDescriptor.hueYellow,
           ),
@@ -3348,4 +3519,27 @@ class _RideRouteMapState extends State<_RideRouteMap> {
       },
     );
   }
+}
+
+/// R4.4B: distancia geográfica aproximada (fórmula de Haversine) entre
+/// dos coordenadas, en metros. Función pura, sin dependencias nuevas
+/// (no se agrega `geolocator` solo para esto) — usada únicamente para
+/// el guard de salto grande del marker del Driver.
+double _driverMarkerDistanceMeters(LatLng a, LatLng b) {
+  const earthRadiusMeters = 6371000.0;
+
+  final lat1 = a.latitude * math.pi / 180;
+  final lat2 = b.latitude * math.pi / 180;
+  final deltaLat = (b.latitude - a.latitude) * math.pi / 180;
+  final deltaLng = (b.longitude - a.longitude) * math.pi / 180;
+
+  final h =
+      math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
+      math.cos(lat1) *
+          math.cos(lat2) *
+          math.sin(deltaLng / 2) *
+          math.sin(deltaLng / 2);
+  final c = 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
+
+  return earthRadiusMeters * c;
 }
