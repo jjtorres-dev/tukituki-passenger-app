@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/router/app_router.dart';
+import 'core/theme/passenger_theme.dart';
 
 class TukiTukiApp extends StatelessWidget {
   const TukiTukiApp({super.key});
@@ -11,13 +12,7 @@ class TukiTukiApp extends StatelessWidget {
       title: 'TukiTuki',
       debugShowCheckedModeBanner: false,
       routerConfig: appRouter,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.amber,
-        inputDecorationTheme: const InputDecorationTheme(
-          filled: true,
-        ),
-      ),
+      theme: PassengerTheme.light,
     );
   }
 }
