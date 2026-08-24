@@ -28,6 +28,7 @@ class GradientHeaderSheet extends StatelessWidget {
     required this.logoAsset,
     required this.sheetChildren,
     this.tagline,
+    this.leadingAction,
     this.logoAspectRatio = 1024 / 1536,
     this.headerMinLogoWidth = 92,
     this.headerMaxLogoWidth = 150,
@@ -50,6 +51,12 @@ class GradientHeaderSheet extends StatelessWidget {
   /// Se oculta cuando el header se comprime a su mínimo (sin importar
   /// la razón: teclado, pantalla baja, etc.).
   final Widget? tagline;
+
+  /// Widget opcional a la izquierda del header (p. ej. la flecha de
+  /// volver de Register). Se pinta aparte del logo, en un `Stack`, para
+  /// que el logo se siga centrando en el ancho completo del header sin
+  /// que este widget le quite espacio ni lo desplace.
+  final Widget? leadingAction;
 
   final double logoAspectRatio;
   final double headerMinLogoWidth;
@@ -90,6 +97,7 @@ class GradientHeaderSheet extends StatelessWidget {
               child: _Header(
                 logoAsset: logoAsset,
                 tagline: tagline,
+                leadingAction: leadingAction,
                 logoAspectRatio: logoAspectRatio,
                 headerMinLogoWidth: headerMinLogoWidth,
                 headerMaxLogoWidth: headerMaxLogoWidth,
@@ -169,6 +177,7 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.logoAsset,
     required this.tagline,
+    required this.leadingAction,
     required this.logoAspectRatio,
     required this.headerMinLogoWidth,
     required this.headerMaxLogoWidth,
@@ -183,6 +192,7 @@ class _Header extends StatelessWidget {
 
   final String logoAsset;
   final Widget? tagline;
+  final Widget? leadingAction;
   final double logoAspectRatio;
   final double headerMinLogoWidth;
   final double headerMaxLogoWidth;
@@ -241,25 +251,40 @@ class _Header extends StatelessWidget {
               stops: gradientStops,
             ),
           ),
-          child: Padding(
-            padding: EdgeInsets.only(top: statusBarInset),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    logoAsset,
-                    width: logoWidth,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
+          child: Stack(
+            children: [
+              Padding(
+                padding: EdgeInsets.only(top: statusBarInset),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        logoAsset,
+                        width: logoWidth,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                      ),
+                      if (showTagline) ...[
+                        SizedBox(height: headerLogoGap),
+                        tagline!,
+                      ],
+                    ],
                   ),
-                  if (showTagline) ...[
-                    SizedBox(height: headerLogoGap),
-                    tagline!,
-                  ],
-                ],
+                ),
               ),
-            ),
+              // Se pinta aparte del Center de arriba, en el mismo
+              // Stack, para que el logo se siga centrando en el ancho
+              // completo del header sin que esto le quite espacio.
+              if (leadingAction != null)
+                Padding(
+                  padding: EdgeInsets.only(top: statusBarInset),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: leadingAction,
+                  ),
+                ),
+            ],
           ),
         );
       },

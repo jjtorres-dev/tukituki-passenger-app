@@ -87,4 +87,25 @@ class PassengerTypography {
     fontSize: 13,
     fontWeight: FontWeight.w500,
   );
+
+  /// Número al lado del indicador de pasos ("1 de 2"). No está en la
+  /// tabla de la sección 3 — ninguna combinación de [pista]/[notaAlPie]
+  /// cubre 12/700. Tomado literalmente de
+  /// `docs/contexto/mockups/registro.html.html` (2026-08-23).
+  static const TextStyle indicadorPasos = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 12,
+    fontWeight: FontWeight.w700,
+  );
+
+  /// Línea que explica por qué el botón principal está deshabilitado
+  /// (sección 5, "Botón principal": "debajo, siempre, una línea de
+  /// 12/500"). Tampoco cubierto por [pista]/[notaAlPie]. Tomado
+  /// literalmente de `docs/contexto/mockups/registro.html.html`
+  /// (2026-08-23).
+  static const TextStyle notaBotonInactivo = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+  );
 }

@@ -4,6 +4,14 @@ import 'package:flutter/material.dart';
 ///
 /// Nombres y valores tomados literalmente de `sistema-de-diseno.md`
 /// sección 2. No se agregan colores que no estén en ese documento.
+///
+/// Dos valores agregados en `DESIGN-SYSTEM-R1` al migrar
+/// `register_screen.dart` (2026-08-23): [bordeBotonInactivo] y
+/// [textoBotonInactivo]. No están en la tabla de la sección 2, pero sí
+/// están fijados como hex literal en la sección 5 ("Botón principal",
+/// estado deshabilitado: "borde 1.5 px #D5CFBA, texto #A79F8A") sin
+/// nombre propio — se les da nombre aquí en vez de escribir el hex a
+/// mano en la pantalla.
 class PassengerColors {
   const PassengerColors._();
 
@@ -20,6 +28,8 @@ class PassengerColors {
   static const Color bordeCampo = Color(0xFFC3CDBE);
   static const Color bordeSuave = Color(0xFFE7E0CB);
   static const Color inactivo = Color(0xFFE2DCC9);
+  static const Color bordeBotonInactivo = Color(0xFFD5CFBA);
+  static const Color textoBotonInactivo = Color(0xFFA79F8A);
 
   // Acento — distinto por app; este es el valor Passenger (verde).
   static const Color acento = Color(0xFF1F7A3E);

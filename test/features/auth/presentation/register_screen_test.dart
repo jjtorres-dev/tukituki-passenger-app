@@ -1,22 +1,17 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:passenger/core/widgets/tuki_text_field.dart';
 import 'package:passenger/features/auth/data/auth_repository.dart';
 import 'package:passenger/features/auth/presentation/register_screen.dart';
 
 void main() {
   Widget buildRegister() {
     return const ProviderScope(child: MaterialApp(home: RegisterScreen()));
-  }
-
-  Finder fieldWithLabel(String label) {
-    return find.ancestor(
-      of: find.text(label),
-      matching: find.byType(TextFormField),
-    );
   }
 
   testWidgets('Register renderiza branding, formulario único y términos', (
@@ -34,26 +29,28 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Crea tu cuenta de pasajero'), findsOneWidget);
+    expect(find.text('Crea tu cuenta'), findsOneWidget);
     expect(find.text('+51'), findsOneWidget);
     expect(find.byType(TextFormField), findsNWidgets(3));
     expect(fieldWithLabel('Contraseña'), findsOneWidget);
     expect(fieldWithLabel('Confirmar contraseña'), findsOneWidget);
-    expect(find.text('Fortaleza'), findsOneWidget);
-    expect(find.text('Débil'), findsOneWidget);
     expect(
-      find.text(
-        'Acepto los Términos y Condiciones y la Política de Privacidad',
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            widget.textSpan?.toPlainText() ==
+                'Al crear tu cuenta aceptas nuestros Términos y nuestra '
+                    'Política de privacidad',
       ),
       findsOneWidget,
     );
     expect(find.text('¿Ya tienes cuenta? Inicia sesión'), findsOneWidget);
 
-    final checkbox = tester.widget<Checkbox>(find.byType(Checkbox));
-    expect(checkbox.value, isFalse);
-
+    // Ya no hay checkbox de términos: el botón se habilita según la
+    // validación normal de los campos (como en Login), no según una
+    // casilla marcada.
     final button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNull);
+    expect(button.onPressed, isNotNull);
   });
 
   testWidgets('Register limita celular a nueve dígitos con teclado numérico', (
@@ -73,33 +70,65 @@ void main() {
     expect(phoneEditable.keyboardType, TextInputType.number);
   });
 
-  testWidgets('Fortaleza es feedback y términos habilitan el CTA', (
+  testWidgets('Indicador de pasos muestra "1 de 2"', (tester) async {
+    await tester.pumpWidget(buildRegister());
+
+    expect(find.text('1 de 2'), findsOneWidget);
+  });
+
+  testWidgets('Pista de contraseña indica los requisitos del Backend', (
     tester,
   ) async {
     await tester.pumpWidget(buildRegister());
 
-    await tester.enterText(fieldWithLabel('Contraseña'), 'Abcdefg1');
-    await tester.pump();
-    expect(find.text('Media'), findsOneWidget);
-
-    var button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNull);
-
-    await tester.tap(find.byType(Checkbox));
-    await tester.pump();
-
-    button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNotNull);
-
-    await tester.enterText(fieldWithLabel('Contraseña'), 'Abcdefg1!234');
-    await tester.pump();
-    expect(find.text('Fuerte'), findsOneWidget);
-    expect(button.onPressed, isNotNull);
+    expect(
+      find.text('Mínimo 8 caracteres, con mayúscula, minúscula y un número.'),
+      findsOneWidget,
+    );
   });
+
+  testWidgets(
+    'Nota de términos: tocar "Términos" muestra el SnackBar temporal',
+    (tester) async {
+      await tester.pumpWidget(buildRegister());
+
+      final termsSpan = _findSpanByText(_termsFootnoteSpan(tester), 'Términos');
+      (termsSpan!.recognizer! as TapGestureRecognizer).onTap!();
+      await tester.pump();
+
+      expect(find.text('Pronto podrás leer nuestros términos'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Nota de términos: tocar "Política de privacidad" muestra el SnackBar '
+    'temporal',
+    (tester) async {
+      await tester.pumpWidget(buildRegister());
+
+      final privacySpan = _findSpanByText(
+        _termsFootnoteSpan(tester),
+        'Política de privacidad',
+      );
+      (privacySpan!.recognizer! as TapGestureRecognizer).onTap!();
+      await tester.pump();
+
+      expect(
+        find.text('Pronto podrás leer nuestra política de privacidad'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('Password coincide con las reglas exactas del Backend', (
     tester,
   ) async {
+    // `TukiTextField` no usa `Form`/`validator` — la validación vive en
+    // `_RegisterScreenState._validatePassword()` y solo corre al tocar
+    // "Crear cuenta", que la vuelca en `errorText`. No hay
+    // `FormFieldState` que invocar directamente: se ejercita la
+    // pantalla como la usaría el usuario y se lee el `errorText`
+    // resultante del propio widget.
     await tester.pumpWidget(buildRegister());
 
     final passwordFinder = fieldWithLabel('Contraseña');
@@ -115,18 +144,26 @@ void main() {
 
     for (final (password, expectedValid) in cases) {
       await tester.enterText(passwordFinder, password);
+      await tester.ensureVisible(find.text('Crear cuenta'));
+      await tester.tap(find.text('Crear cuenta'));
+      await tester.pump();
 
-      final fieldState = tester.state<FormFieldState<String>>(passwordFinder);
+      final field = tester.widget<TukiTextField>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is TukiTextField && widget.hintText == 'Tu contraseña',
+        ),
+      );
       expect(
-        fieldState.validate(),
+        field.errorText == null,
         expectedValid,
         reason: 'Resultado inesperado para $password',
       );
-      await tester.pump();
     }
 
     await tester.enterText(passwordFinder, 'password1');
-    tester.state<FormFieldState<String>>(passwordFinder).validate();
+    await tester.ensureVisible(find.text('Crear cuenta'));
+    await tester.tap(find.text('Crear cuenta'));
     await tester.pump();
     expect(
       find.text('La contraseña debe incluir mayúscula, minúscula y número'),
@@ -402,26 +439,67 @@ Future<void> _pumpRegisterFlow(
 }
 
 Future<void> _submitValidRegister(WidgetTester tester) async {
-  await tester.enterText(
-    _registerFieldWithLabel('Número de celular'),
-    '999999999',
-  );
-  await tester.enterText(_registerFieldWithLabel('Contraseña'), 'Password1');
-  await tester.enterText(
-    _registerFieldWithLabel('Confirmar contraseña'),
-    'Password1',
-  );
-  await tester.tap(find.byType(Checkbox));
-  await tester.pump();
+  await tester.enterText(fieldWithLabel('Número de celular'), '999999999');
+  await tester.enterText(fieldWithLabel('Contraseña'), 'Password1');
+  await tester.enterText(fieldWithLabel('Confirmar contraseña'), 'Password1');
   await tester.ensureVisible(find.text('Crear cuenta'));
   await tester.tap(find.text('Crear cuenta'));
 }
 
-Finder _registerFieldWithLabel(String label) {
-  return find.ancestor(
-    of: find.text(label),
+/// `TukiTextField` (a diferencia del `TextFormField` de Material que
+/// reemplazó) no pone la etiqueta dentro del campo — es un `Text`
+/// hermano que lo precede (`_FieldLabel` en `register_screen.dart`),
+/// así que `find.ancestor(of: find.text(label), ...)` ya no encuentra
+/// nada. En vez de depender de la etiqueta, este finder ubica el
+/// campo por su `hintText`, una propiedad propia y estable del widget.
+Finder fieldWithLabel(String label) {
+  final hintText = switch (label) {
+    'Número de celular' => '987 654 321',
+    'Contraseña' => 'Tu contraseña',
+    'Confirmar contraseña' => 'Repite tu contraseña',
+    _ => throw ArgumentError.value(label, 'label', 'Sin hint mapeado'),
+  };
+
+  return find.descendant(
+    of: find.byWidgetPredicate(
+      (widget) => widget is TukiTextField && widget.hintText == hintText,
+    ),
     matching: find.byType(TextFormField),
   );
+}
+
+/// Ubica el `TextSpan` raíz de la nota al pie de términos (el único
+/// `Text.rich` de la pantalla cuyo texto plano incluye "Términos").
+TextSpan _termsFootnoteSpan(WidgetTester tester) {
+  final richText = tester.widget<Text>(
+    find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          (widget.textSpan?.toPlainText().contains('Términos') ?? false),
+    ),
+  );
+
+  return richText.textSpan! as TextSpan;
+}
+
+/// Busca, en el árbol de un `TextSpan`, el span hijo cuyo texto sea
+/// exactamente [text] (p. ej. el enlace "Términos" dentro de la nota
+/// al pie, que tiene su propio `recognizer`).
+TextSpan? _findSpanByText(InlineSpan root, String text) {
+  if (root is TextSpan) {
+    if (root.text == text) {
+      return root;
+    }
+
+    for (final child in root.children ?? const <InlineSpan>[]) {
+      final found = _findSpanByText(child, text);
+      if (found != null) {
+        return found;
+      }
+    }
+  }
+
+  return null;
 }
 
 Future<void> _flushAsync(WidgetTester tester) async {

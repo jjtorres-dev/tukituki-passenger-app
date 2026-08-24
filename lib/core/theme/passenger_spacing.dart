@@ -32,6 +32,16 @@
 /// [espacioAntesEnlaceSecundario]: separación entre el campo de
 /// contraseña y "¿Olvidaste tu contraseña?" (2026-08-20). Tomado
 /// literalmente del mockup (`margin: 14px 0 0` sobre ese enlace).
+///
+/// Dos valores agregados al migrar `register_screen.dart`
+/// (2026-08-23), tomados literalmente de
+/// `docs/contexto/mockups/registro.html.html` para el indicador de
+/// pasos nuevo (sección 5, "Indicador de pasos"), que no fijaba estos
+/// dos números:
+/// - [espacioIndicadorPasos]: separación entre las barras y el texto
+///   "1 de 2" (`gap: 8px` en el contenedor flex del indicador).
+/// - [espacioDespuesIndicadorPasos]: separación entre el indicador de
+///   pasos y el título de la hoja (`margin-bottom: 18px`).
 class PassengerSpacing {
   const PassengerSpacing._();
 
@@ -51,6 +61,8 @@ class PassengerSpacing {
   static const double espacioEtiquetaCampo = 7;
   static const double espacioInternoCampo = 14;
   static const double espacioAntesEnlaceSecundario = 14;
+  static const double espacioIndicadorPasos = 8;
+  static const double espacioDespuesIndicadorPasos = 18;
 
   /// Ningún elemento tocable mide menos de esto de lado.
   static const double tamanoTocableMinimo = 44;
