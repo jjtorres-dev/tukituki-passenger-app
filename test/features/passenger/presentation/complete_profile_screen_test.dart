@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:passenger/core/widgets/tuki_text_field.dart';
 import 'package:passenger/features/passenger/data/passenger_profile_repository.dart';
 import 'package:passenger/features/passenger/presentation/complete_profile_screen.dart';
 
@@ -37,11 +38,11 @@ void main() {
       await _pumpScreen(tester, router: router, repository: repository);
 
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Nombres'),
+        fieldWithLabel('Nombres'),
         '  Juan  ',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Apellidos'),
+        fieldWithLabel('Apellidos'),
         '  Pérez  ',
       );
 
@@ -66,11 +67,11 @@ void main() {
       await _pumpScreen(tester, router: router, repository: repository);
 
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Nombres'),
+        fieldWithLabel('Nombres'),
         'Juan',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Apellidos'),
+        fieldWithLabel('Apellidos'),
         'Pérez',
       );
 
@@ -100,11 +101,11 @@ void main() {
       await _pumpScreen(tester, router: router, repository: repository);
 
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Nombres'),
+        fieldWithLabel('Nombres'),
         'Juan',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Apellidos'),
+        fieldWithLabel('Apellidos'),
         'Pérez',
       );
 
@@ -128,11 +129,11 @@ void main() {
     await _pumpScreen(tester, router: router, repository: repository);
 
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Nombres'),
+      fieldWithLabel('Nombres'),
       'Juan',
     );
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Apellidos'),
+      fieldWithLabel('Apellidos'),
       'Pérez',
     );
 
@@ -159,11 +160,11 @@ void main() {
       await _pumpScreen(tester, router: router, repository: repository);
 
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Nombres'),
+        fieldWithLabel('Nombres'),
         'Juan',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Apellidos'),
+        fieldWithLabel('Apellidos'),
         'Pérez',
       );
 
@@ -178,6 +179,72 @@ void main() {
       );
     },
   );
+
+  testWidgets('CompleteProfile no desborda en tamaños Passenger aprobados', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    for (final size in [const Size(360, 640), const Size(390, 844)]) {
+      tester.view.physicalSize = size;
+
+      await tester.pumpWidget(_buildCompleteProfile());
+
+      expect(find.text('Cuéntanos quién eres'), findsOneWidget);
+      expect(find.text('Continuar'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'CTA es alcanzable con teclado en tamaños Passenger aprobados '
+    '(header se comprime a su mínimo, la hoja hace scroll)',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetViewInsets);
+
+      for (final size in [const Size(360, 640), const Size(390, 844)]) {
+        tester.view.physicalSize = size;
+        tester.view.viewInsets = const FakeViewPadding();
+
+        await tester.pumpWidget(_buildCompleteProfile());
+        await tester.ensureVisible(fieldWithLabel('Apellidos'));
+        await tester.tap(fieldWithLabel('Apellidos'));
+        await tester.pump();
+
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(find.text('Continuar'));
+        await tester.pumpAndSettle();
+
+        final cta = find.text('Continuar');
+        final ctaRect = tester.getRect(cta);
+        final keyboardTop = size.height - 300;
+
+        expect(cta, findsOneWidget);
+        expect(ctaRect.top, greaterThanOrEqualTo(0));
+        expect(ctaRect.bottom, lessThanOrEqualTo(keyboardTop));
+        expect(tester.takeException(), isNull);
+      }
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+}
+
+/// `passengerProfileRepositoryProvider` no se lee durante `build()` —
+/// solo dentro de `_save()`, al tocar "Continuar" con datos válidos —
+/// así que estos dos tests (que solo verifican layout/overflow, sin
+/// llegar a guardar) no necesitan overridearlo con un fake.
+Widget _buildCompleteProfile() {
+  return const ProviderScope(child: MaterialApp(home: CompleteProfileScreen()));
 }
 
 class _FakePassengerProfileRepository extends PassengerProfileRepository {
@@ -253,6 +320,28 @@ Future<void> _pumpScreen(
   );
 
   await tester.pumpAndSettle();
+}
+
+/// `TukiTextField` no pone la etiqueta dentro del campo — es un
+/// `Text` hermano que lo precede (`_FieldLabel` en
+/// `complete_profile_screen.dart`), así que
+/// `find.widgetWithText(TextFormField, label)` ya no encuentra nada
+/// (mismo ajuste que en `register_screen_test.dart`). En vez de la
+/// etiqueta, este finder ubica el campo por su `hintText`, una
+/// propiedad propia y estable del widget.
+Finder fieldWithLabel(String label) {
+  final hintText = switch (label) {
+    'Nombres' => 'Juan José',
+    'Apellidos' => 'Torres Solano',
+    _ => throw ArgumentError.value(label, 'label', 'Sin hint mapeado'),
+  };
+
+  return find.descendant(
+    of: find.byWidgetPredicate(
+      (widget) => widget is TukiTextField && widget.hintText == hintText,
+    ),
+    matching: find.byType(TextFormField),
+  );
 }
 
 DioException _dioHttpError(String path, int statusCode) {

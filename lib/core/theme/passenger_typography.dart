@@ -108,4 +108,15 @@ class PassengerTypography {
     fontSize: 12,
     fontWeight: FontWeight.w500,
   );
+
+  /// Nota de privacidad bajo el botón principal en "Completa tu
+  /// perfil" (candado + texto). Cae en el rango 12–13/400–500 de la
+  /// sección 3, pero ninguna combinación de [pista]/[notaAlPie] la
+  /// cubre exactamente (13/400). Tomado literalmente de
+  /// `docs/contexto/mockups/completa-perfil.html.html` (2026-08-24).
+  static const TextStyle notaPrivacidad = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 13,
+    fontWeight: FontWeight.w400,
+  );
 }

@@ -42,6 +42,19 @@
 ///   "1 de 2" (`gap: 8px` en el contenedor flex del indicador).
 /// - [espacioDespuesIndicadorPasos]: separación entre el indicador de
 ///   pasos y el título de la hoja (`margin-bottom: 18px`).
+///
+/// Tres valores agregados al migrar `complete_profile_screen.dart`
+/// (2026-08-24), tomados literalmente de
+/// `docs/contexto/mockups/completa-perfil.html.html` para la nota de
+/// privacidad del número de celular (candado + texto bajo el botón
+/// principal), que no tenían equivalente ya definido:
+/// - [espacioAntesNotaPie]: separación entre el botón principal y la
+///   nota (`margin: 20px ...` del contenedor de la nota en el
+///   mockup).
+/// - [espacioIconoNotaPie]: separación entre el ícono de candado y su
+///   texto (`gap: 9px`).
+/// - [tamanoIconoNotaPie]: tamaño del ícono de candado (`font-size:
+///   17px` del ícono en el mockup).
 class PassengerSpacing {
   const PassengerSpacing._();
 
@@ -63,6 +76,9 @@ class PassengerSpacing {
   static const double espacioAntesEnlaceSecundario = 14;
   static const double espacioIndicadorPasos = 8;
   static const double espacioDespuesIndicadorPasos = 18;
+  static const double espacioAntesNotaPie = 20;
+  static const double espacioIconoNotaPie = 9;
+  static const double tamanoIconoNotaPie = 17;
 
   /// Ningún elemento tocable mide menos de esto de lado.
   static const double tamanoTocableMinimo = 44;
