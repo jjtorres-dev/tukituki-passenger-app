@@ -11,6 +11,7 @@ import '../../../core/theme/passenger_typography.dart';
 import '../../../core/widgets/gradient_header_sheet.dart';
 import '../../../core/widgets/tuki_text_field.dart';
 import '../data/auth_repository.dart';
+import 'splash_screen.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -133,7 +134,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         return;
       }
 
-      context.go('/splash');
+      // El usuario recién pulsó "Crear cuenta": el delay de arranque
+      // en frío de Splash no aplica acá, se sentiría como una falla.
+      context.go(
+        '/splash',
+        extra: const SplashArguments(skipInitialDelay: true),
+      );
     } on DioException catch (error) {
       if (!mounted) {
         return;

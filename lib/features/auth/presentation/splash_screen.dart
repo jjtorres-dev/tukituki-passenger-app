@@ -11,8 +11,24 @@ import '../../ride/data/ride_repository.dart';
 import '../data/auth_repository.dart';
 import '../domain/passenger_session_state.dart';
 
+/// Datos opcionales para alcanzar `/splash` (`context.go('/splash',
+/// extra: ...)`) sabiendo de antemano que no hace falta el delay de
+/// arranque en frío — ver [SplashScreen.skipInitialDelay].
+class SplashArguments {
+  const SplashArguments({this.skipInitialDelay = false});
+
+  final bool skipInitialDelay;
+}
+
 class SplashScreen extends ConsumerStatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.skipInitialDelay = false});
+
+  /// Cuando se llega aquí recién autenticándose (registro o login), el
+  /// usuario acaba de pulsar un botón: cualquier pausa extra se siente
+  /// como una falla, no como marca. El delay de arranque en frío
+  /// (`_waitInitialDelay`) solo tiene sentido cuando la app recién se
+  /// abre — con este flag en `true`, `_checkSession` lo salta.
+  final bool skipInitialDelay;
 
   @override
   ConsumerState<SplashScreen> createState() => _SplashScreenState();
@@ -35,7 +51,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(_checkSession());
+    unawaited(_checkSession(initialDelay: !widget.skipInitialDelay));
   }
 
   @override
