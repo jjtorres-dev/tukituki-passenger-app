@@ -58,6 +58,18 @@ class PassengerTypography {
     fontWeight: FontWeight.w700,
   );
 
+  /// Enlace independiente y de menor jerarquía que [enlace] (que es
+  /// para el texto de enlace dentro de una frase, sección 3: "15,
+  /// 400/700"). No está en la tabla de la sección 3 — tamaño y peso
+  /// tomados literalmente de `docs/contexto/mockups/login.html.html`
+  /// (`¿Olvidaste tu contraseña?`, `font-size: 14px; font-weight:
+  /// 600;`) por indicación directa de JuanJo (2026-08-20).
+  static const TextStyle enlaceAuxiliar = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+  );
+
   static const TextStyle etiquetaCampo = TextStyle(
     fontFamily: fontFamily,
     fontSize: 13,
