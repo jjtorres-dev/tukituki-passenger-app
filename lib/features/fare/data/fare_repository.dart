@@ -24,6 +24,12 @@ class FareRepository {
     required String destinationAddress,
     String originAddress =
         'Ubicación actual del pasajero',
+    /// true = el destino se eligió tocando el mapa (nunca
+    /// autocomplete). Reemplaza la señal implícita que antes se
+    /// infería comparando [destinationAddress] contra un literal de
+    /// copy de UI — ver `home_screen.dart` (G4B-CONTRACT-R1) y
+    /// `fares.service.ts` en el backend.
+    bool destinationIsManualSelection = false,
   }) async {
     final response =
         await _dio.post<Map<String, dynamic>>(
@@ -38,6 +44,7 @@ class FareRepository {
           'latitude': destinationLatitude,
           'longitude': destinationLongitude,
           'address': destinationAddress,
+          'isManualSelection': destinationIsManualSelection,
         },
         'isNight': false,
         'isRaining': false,

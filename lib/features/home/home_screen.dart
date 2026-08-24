@@ -49,10 +49,14 @@ class _HomeScreenState
 
   /// Literal local que marca "el Passenger todavía no tiene una
   /// dirección real para este destino" (recién tocó el mapa, sin
-  /// pasar por autocomplete). Mismo texto que Backend reconoce como
-  /// señal para hacer reverse geocoding — G4B-R5.2 lo reutiliza para
-  /// saber, cuando llega el FareQuote, si corresponde reemplazar
-  /// esta tarjeta por la dirección real que Backend ya resolvió.
+  /// pasar por autocomplete). Se sigue enviando como `address` (el
+  /// backend lo exige no vacío) y se sigue mostrando en pantalla
+  /// hasta que llega el FareQuote, pero desde G4B-CONTRACT-R1 la
+  /// señal real para que Backend dispare reverse geocoding es la
+  /// bandera `isManualSelection` (ver `_destinationIsManualSelection`
+  /// más abajo) — este texto ya NO se compara contra nada, ni acá ni
+  /// en Backend, salvo en el fallback legado de una única instalación
+  /// anterior a ese campo (ver `fares.service.ts`).
   static const String _manualDestinationPlaceholder =
       'Destino seleccionado en el mapa';
 
@@ -77,6 +81,15 @@ class _HomeScreenState
 
   String? _selectedDestinationAddress;
   String? _selectedDestinationName;
+
+  /// true = el destino actual vino de tocar el mapa (nunca de
+  /// autocomplete). Es la señal real que se manda a Backend como
+  /// `destination.isManualSelection` (G4B-CONTRACT-R1) y la que esta
+  /// misma pantalla usa para saber, cuando llega el FareQuote, si
+  /// corresponde reemplazar la tarjeta por la dirección real que
+  /// Backend ya resolvió — ya no se infiere comparando texto contra
+  /// `_manualDestinationPlaceholder`.
+  bool _destinationIsManualSelection = false;
 
   List<PlacePrediction> _placePredictions =
       const [];
@@ -520,6 +533,8 @@ class _HomeScreenState
       _selectedDestinationAddress =
           _manualDestinationPlaceholder;
 
+      _destinationIsManualSelection = true;
+
       _placePredictions = const [];
       _placeSearchMessage = null;
       _placesSessionToken = null;
@@ -541,6 +556,7 @@ class _HomeScreenState
       _selectedDestination = null;
       _selectedDestinationAddress = null;
       _selectedDestinationName = null;
+      _destinationIsManualSelection = false;
 
       _placePredictions = const [];
       _placeSearchMessage = null;
@@ -740,6 +756,8 @@ class _HomeScreenState
 
         _selectedDestinationAddress =
             details.formattedAddress;
+
+        _destinationIsManualSelection = false;
 
         _placePredictions = const [];
         _placeSearchMessage = null;
@@ -1081,6 +1099,9 @@ class _HomeScreenState
             destinationAddress:
                 _selectedDestinationAddress ??
                 _manualDestinationPlaceholder,
+
+            destinationIsManualSelection:
+                _destinationIsManualSelection,
           );
 
       if (!mounted || requestId != _quoteRequestId) {
@@ -1097,20 +1118,22 @@ class _HomeScreenState
                   encodedPolyline,
                 );
 
-      // G4B-R5.2: si el destino vino de un tap en el mapa (todavía
-      // muestra el placeholder local), reemplaza la tarjeta Home por
-      // la dirección real que Backend ya resolvió — sin volver a
-      // pedir un FareQuote ni tocar coordenadas. Autocomplete nunca
-      // deja este placeholder puesto, así que este bloque nunca lo
-      // toca (no rompe "B" del checkpoint). Vive DESPUÉS del check
-      // de `requestId` de arriba, así que una respuesta obsoleta de
-      // un destino anterior jamás llega hasta acá (protege Caso 4).
+      // G4B-R5.2 (señal desde G4B-CONTRACT-R1): si el destino vino de
+      // un tap en el mapa (`_destinationIsManualSelection`), reemplaza
+      // la tarjeta Home por la dirección real que Backend ya
+      // resolvió — sin volver a pedir un FareQuote ni tocar
+      // coordenadas. Ya no se infiere comparando `address` contra
+      // `_manualDestinationPlaceholder`: un destino de autocomplete
+      // nunca deja `_destinationIsManualSelection` en true, así que
+      // este bloque nunca lo toca (no rompe "B" del checkpoint). Vive
+      // DESPUÉS del check de `requestId` de arriba, así que una
+      // respuesta obsoleta de un destino anterior jamás llega hasta
+      // acá (protege Caso 4).
       final resolvedDestinationAddress =
           quote.destinationAddress.trim();
 
       final destinationAddressResolved =
-          _selectedDestinationAddress ==
-              _manualDestinationPlaceholder &&
+          _destinationIsManualSelection &&
           resolvedDestinationAddress.isNotEmpty;
 
       setState(() {
@@ -1885,6 +1908,10 @@ class _HomeScreenState
                     const SizedBox(height: 16),
 
                     TextField(
+                      key: const ValueKey(
+                        'destination-search-field',
+                      ),
+
                       controller:
                           _destinationSearchController,
 

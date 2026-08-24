@@ -523,6 +523,61 @@ void main() {
   );
 
   testWidgets(
+    'G4B-CONTRACT-R1: manda destination.isManualSelection=true al tocar el '
+    'mapa y false al elegir por autocomplete — sin depender del texto de '
+    'destinationAddress (lo que este contrato reemplaza)',
+    (tester) async {
+      const prediction = PlacePrediction(
+        placeId: 'place-1',
+        primaryText: 'Municipalidad de Tarapoto',
+        secondaryText: 'Jr. Jiménez Pimentel 210',
+        fullText: 'Municipalidad de Tarapoto, Jr. Jiménez Pimentel 210',
+        distanceMeters: 500,
+      );
+      const details = PlaceDetails(
+        placeId: 'place-1',
+        formattedAddress: 'Jr. Jiménez Pimentel 210, Tarapoto 22202, Perú',
+        latitude: -6.4812,
+        longitude: -76.3655,
+      );
+
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository();
+      final placesRepository = _FakePlacesRepository(
+        predictions: const [prediction],
+        details: details,
+      );
+
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+        placesRepository: placesRepository,
+      );
+
+      // Llamada 1: destino elegido tocando el mapa.
+      await _selectDestinationOnMap(tester);
+
+      expect(fareRepository.callCount, 1);
+      expect(fareRepository.requestedIsManualSelection[0], isTrue);
+
+      // No hace falta limpiar el destino manual antes de este paso:
+      // `_selectDestinationViaAutocomplete` ubica el buscador por su
+      // Key propia (`destination-search-field`), así que sigue siendo
+      // inequívoco aunque la cotización del paso anterior haya
+      // agregado su propio campo de texto ("¿Cuánto quieres ofrecer?").
+      await _selectDestinationViaAutocomplete(
+        tester,
+        query: 'Municipalidad',
+        prediction: prediction,
+      );
+
+      expect(fareRepository.callCount, 2);
+      expect(fareRepository.requestedIsManualSelection[1], isFalse);
+    },
+  );
+
+  testWidgets(
     'G4B-R5.2-4: respuesta obsoleta de A no puede sobrescribir la '
     'dirección real de B',
     (tester) async {
@@ -706,12 +761,16 @@ Future<void> _selectDestinationOnMap(WidgetTester tester) async {
 /// G4B-R5.2: escribe en el buscador, deja pasar el debounce real
 /// (450ms), flushea `autocomplete()`, y toca la primera predicción —
 /// mismo camino real que usaría el Passenger.
+final _destinationSearchFieldFinder = find.byKey(
+  const ValueKey('destination-search-field'),
+);
+
 Future<void> _selectDestinationViaAutocomplete(
   WidgetTester tester, {
   required String query,
   required PlacePrediction prediction,
 }) async {
-  await tester.enterText(find.byType(TextField), query);
+  await tester.enterText(_destinationSearchFieldFinder, query);
   await tester.pump(const Duration(milliseconds: 500));
   await _flushAsync(tester);
 
@@ -867,6 +926,14 @@ class _FakeFareRepository extends FareRepository {
   int callCount = 0;
 
   final List<String> requestedDestinationAddresses = [];
+
+  /// G4B-CONTRACT-R1: qué mandó `home_screen.dart` como
+  /// `destination.isManualSelection` en cada llamada (índice `N - 1`,
+  /// igual que [destinationAddressOverrides]). Permite verificar que
+  /// la pantalla manda la bandera correcta SIN depender de comparar
+  /// texto contra ningún placeholder — justo lo que este contrato
+  /// reemplaza.
+  final List<bool> requestedIsManualSelection = [];
   final List<Completer<void>> _pendingCompleters = [];
 
   void resolveCall(int index) {
@@ -881,10 +948,12 @@ class _FakeFareRepository extends FareRepository {
     required double destinationLongitude,
     required String destinationAddress,
     String originAddress = 'Ubicación actual del pasajero',
+    bool destinationIsManualSelection = false,
   }) async {
     callCount++;
 
     requestedDestinationAddresses.add(destinationAddress);
+    requestedIsManualSelection.add(destinationIsManualSelection);
 
     if (failFirstCall && callCount == 1) {
       throw Exception('Fallo simulado de red');
