@@ -888,6 +888,60 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'varios taps rápidos sin moverse producen una sola llamada al '
+      'repositorio, no una por tap',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(
+          estimatedFare: '7.00',
+          originAddress: 'Calle Rioja 495, Tarapoto',
+          holdOriginAddressRequests: true,
+        );
+        final rideRepository = _FakeRideRepository();
+
+        // Sin `locationSequence`: siempre el mismo punto fijo — el
+        // Passenger no se movió entre taps.
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        // La primera llamada real ya se disparó y quedó "en vuelo"
+        // a propósito (holdOriginAddressRequests) — el Passenger
+        // todavía no ve la dirección resuelta.
+        expect(fareRepository.originAddressCallCount, 1);
+
+        // Varios taps rápidos de "centrar en mi ubicación" mientras
+        // esa primera llamada sigue sin responder. Cada tap completa
+        // su propio ciclo de GPS/cámara (no depende de
+        // origin-address), pero ninguno debe disparar una segunda
+        // llamada al backend para prácticamente el mismo punto — este
+        // es el bug reportado (taps repetidos acumulando llamadas).
+        await _tapCenterOnMyLocation(tester);
+        await _tapCenterOnMyLocation(tester);
+        await _tapCenterOnMyLocation(tester);
+
+        expect(fareRepository.originAddressCallCount, 1);
+
+        // Al responder la única llamada real, se refleja con
+        // normalidad.
+        fareRepository.resolveOriginAddressCall(0);
+        await _flushAsync(tester);
+
+        expect(
+          find.text('Calle Rioja 495, Tarapoto'),
+          findsOneWidget,
+        );
+
+        // Un tap posterior, ya con la dirección resuelta y sin
+        // movimiento, tampoco dispara una llamada nueva.
+        await _tapCenterOnMyLocation(tester);
+
+        expect(fareRepository.originAddressCallCount, 1);
+      },
+    );
   });
 }
 
@@ -1087,6 +1141,7 @@ class _FakeFareRepository extends FareRepository {
     this.destinationAddressOverrides,
     this.originAddress = 'Calle Rioja 495, Tarapoto',
     this.failOriginAddress = false,
+    this.holdOriginAddressRequests = false,
   }) : super(Dio());
 
   String estimatedFare;
@@ -1137,8 +1192,20 @@ class _FakeFareRepository extends FareRepository {
   /// backend ya absorbe con su propio fallback).
   bool failOriginAddress;
 
+  /// Si es `true`, cada llamada a `getOriginAddress` queda pendiente
+  /// (su Future no se resuelve) hasta que el test la libere
+  /// explícitamente con [resolveOriginAddressCall] — permite
+  /// reproducir taps repetidos mientras la primera llamada real
+  /// sigue "en vuelo", sin depender de timing real.
+  bool holdOriginAddressRequests;
+
   int originAddressCallCount = 0;
   final List<List<double>> requestedOriginCoordinates = [];
+  final List<Completer<void>> _pendingOriginAddressCompleters = [];
+
+  void resolveOriginAddressCall(int index) {
+    _pendingOriginAddressCompleters[index].complete();
+  }
 
   @override
   Future<String> getOriginAddress({
@@ -1147,6 +1214,12 @@ class _FakeFareRepository extends FareRepository {
   }) async {
     originAddressCallCount++;
     requestedOriginCoordinates.add([latitude, longitude]);
+
+    if (holdOriginAddressRequests) {
+      final completer = Completer<void>();
+      _pendingOriginAddressCompleters.add(completer);
+      await completer.future;
+    }
 
     if (failOriginAddress) {
       throw Exception('Fallo simulado de red');

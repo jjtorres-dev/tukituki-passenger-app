@@ -120,6 +120,24 @@ class _HomeScreenState
   /// de la más reciente.
   int _originAddressRequestId = 0;
 
+  /// Posición para la que hay una llamada a `fares/origin-address`
+  /// REALMENTE en curso ahora mismo (disparada, sin responder
+  /// todavía). Deliberadamente separada de
+  /// [_resolvedOriginAddressPosition] (que solo se mueve en éxito):
+  /// si se usara el mismo campo para ambas cosas, un fallo dejaría el
+  /// cache de "ya resuelto" apuntando a un punto cuya dirección nunca
+  /// se obtuvo, bloqueando reintentos futuros para ese mismo lugar.
+  /// Se limpia al terminar la llamada, tanto en éxito como en fallo
+  /// (ver [_originAddressInFlightRequestId], que decide si a ESTA
+  /// llamada le corresponde limpiarla).
+  LatLng? _originAddressInFlightPosition;
+
+  /// [_originAddressRequestId] que "es dueño" de
+  /// [_originAddressInFlightPosition] — evita que una llamada vieja,
+  /// al terminar, borre por error el marcador "en vuelo" de una
+  /// llamada más nueva para un punto distinto que ya lo reemplazó.
+  int? _originAddressInFlightRequestId;
+
   String? _selectedDestinationAddress;
   String? _selectedDestinationName;
 
@@ -398,10 +416,14 @@ class _HomeScreenState
   /// cotización (`GET fares/origin-address`, liviano, sin persistir
   /// nada). Cachea por distancia: si [position] cae dentro de
   /// [_originAddressCacheDistanceMeters] de la última posición ya
-  /// resuelta, no vuelve a llamar al backend. Nunca bloquea ni
-  /// muestra error si falla — la pantalla sigue mostrando el
-  /// placeholder existente ('Tu ubicación actual') hasta que llegue
-  /// la cotización real o una resolución futura tenga éxito.
+  /// resuelta, no vuelve a llamar al backend. Tampoco dispara una
+  /// llamada nueva si YA hay una en curso para prácticamente el mismo
+  /// punto (taps repetidos de "centrar en mi ubicación" sin moverse no
+  /// deben acumular llamadas a `fares/origin-address` — ver
+  /// [_originAddressInFlightPosition]). Nunca bloquea ni muestra error
+  /// si falla — la pantalla sigue mostrando el placeholder existente
+  /// ('Tu ubicación actual') hasta que llegue la cotización real o una
+  /// resolución futura tenga éxito.
   Future<void> _resolveOriginAddress(
     Position position,
   ) async {
@@ -410,18 +432,44 @@ class _HomeScreenState
       position.longitude,
     );
 
-    final cachedPoint = _resolvedOriginAddressPosition;
+    final resolvedPoint = _resolvedOriginAddressPosition;
 
-    if (cachedPoint != null &&
+    if (resolvedPoint != null &&
         _originAddressDistanceMeters(
-              cachedPoint,
+              resolvedPoint,
               newPoint,
             ) <=
             _originAddressCacheDistanceMeters) {
       return;
     }
 
+    final inFlightPoint = _originAddressInFlightPosition;
+
+    if (inFlightPoint != null &&
+        _originAddressDistanceMeters(
+              inFlightPoint,
+              newPoint,
+            ) <=
+            _originAddressCacheDistanceMeters) {
+      // Ya hay una resolución real en curso para prácticamente el
+      // mismo punto — esa llamada, al terminar, ya va a actualizar
+      // el estado. Disparar otra sería un duplicado innecesario.
+      return;
+    }
+
     final requestId = ++_originAddressRequestId;
+
+    /*
+     * Marca "en vuelo" AL INICIAR, no al recibir la respuesta —
+     * si se marcara solo al final, dos taps casi simultáneos
+     * pasarían ambos el chequeo de arriba antes de que cualquiera
+     * termine. Deliberadamente en un campo separado de
+     * `_resolvedOriginAddressPosition`: ese solo se mueve en éxito,
+     * así que un fallo acá nunca deja el cache de "ya resuelto"
+     * apuntando a un punto sin dirección real.
+     */
+    _originAddressInFlightPosition = newPoint;
+    _originAddressInFlightRequestId = requestId;
 
     try {
       final address = await ref
@@ -445,6 +493,14 @@ class _HomeScreenState
       debugPrint(
         'Error resolviendo dirección de origen: $error',
       );
+    } finally {
+      // Solo limpia si el marcador "en vuelo" sigue siendo el de ESTA
+      // llamada — una llamada más nueva, para un punto distinto, ya
+      // pudo haberlo reemplazado mientras esta seguía en curso.
+      if (_originAddressInFlightRequestId == requestId) {
+        _originAddressInFlightPosition = null;
+        _originAddressInFlightRequestId = null;
+      }
     }
   }
 
