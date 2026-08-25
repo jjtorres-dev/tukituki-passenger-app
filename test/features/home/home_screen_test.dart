@@ -740,6 +740,155 @@ void main() {
       expect(rideRepository.createRideCalls.single, '8.00');
     },
   );
+
+  group('ORIGIN-ADDRESS-R1', () {
+    testWidgets(
+      'resuelve y muestra la dirección real de origen apenas hay GPS, '
+      'sin esperar a que se elija destino',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(
+          estimatedFare: '7.00',
+          originAddress: 'Calle Rioja 495, Tarapoto',
+        );
+        final rideRepository = _FakeRideRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(fareRepository.originAddressCallCount, 1);
+        expect(fareRepository.requestedOriginCoordinates.single, [
+          -6.4877,
+          -76.3599,
+        ]);
+
+        expect(
+          find.text('Calle Rioja 495, Tarapoto'),
+          findsOneWidget,
+        );
+        expect(find.text('Tu ubicación actual'), findsNothing);
+
+        // Sin destino, jamás se dispara una cotización — la dirección
+        // resuelta no depende de eso.
+        expect(fareRepository.callCount, 0);
+      },
+    );
+
+    testWidgets(
+      'si falla la resolución, no rompe la pantalla y conserva el '
+      'placeholder existente',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(
+          estimatedFare: '7.00',
+          failOriginAddress: true,
+        );
+        final rideRepository = _FakeRideRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(fareRepository.originAddressCallCount, 1);
+        expect(find.text('Tu ubicación actual'), findsOneWidget);
+
+        // La pantalla sigue funcional: el CTA de destino sigue ahí.
+        expect(find.text('Selecciona un destino'), findsNWidgets(2));
+      },
+    );
+
+    testWidgets(
+      'la dirección real de la cotización siempre gana sobre la '
+      'resuelta preemptivamente',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(
+          estimatedFare: '7.00',
+          originAddress: 'Preemptiva: Jr. Lima 250',
+        );
+        final rideRepository = _FakeRideRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(
+          find.text('Preemptiva: Jr. Lima 250'),
+          findsOneWidget,
+        );
+
+        await _selectDestinationOnMap(tester);
+
+        // La cotización real (fake fija su propio originAddress) pisa
+        // la dirección preemptiva, sin ambigüedad de prioridad.
+        expect(find.text('Preemptiva: Jr. Lima 250'), findsNothing);
+        expect(fareRepository.callCount, 1);
+      },
+    );
+
+    testWidgets(
+      'dentro del umbral de cacheo por distancia, no vuelve a llamar '
+      'al backend',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository();
+
+        // Segundo punto a ~5m del primero — muy por debajo de los 50m
+        // del umbral (~0.00005° de latitud ya son unos 5.5m en esta
+        // latitud).
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+          locationSequence: [
+            _buildPosition(-6.4877, -76.3599),
+            _buildPosition(-6.48775, -76.3599),
+          ],
+        );
+
+        expect(fareRepository.originAddressCallCount, 1);
+
+        await _tapCenterOnMyLocation(tester);
+
+        expect(fareRepository.originAddressCallCount, 1);
+      },
+    );
+
+    testWidgets(
+      'fuera del umbral de cacheo por distancia, resuelve una '
+      'dirección nueva',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository();
+
+        // Segundo punto a ~1.1km del primero (0.01° de latitud) — muy
+        // por encima de los 50m del umbral.
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+          locationSequence: [
+            _buildPosition(-6.4877, -76.3599),
+            _buildPosition(-6.4977, -76.3599),
+          ],
+        );
+
+        expect(fareRepository.originAddressCallCount, 1);
+
+        await _tapCenterOnMyLocation(tester);
+
+        expect(fareRepository.originAddressCallCount, 2);
+        expect(
+          fareRepository.requestedOriginCoordinates[1],
+          [-6.4977, -76.3599],
+        );
+      },
+    );
+  });
 }
 
 final _offerFieldFinder = find.byKey(const ValueKey('passenger-offer-field'));
@@ -755,6 +904,14 @@ TextEditingController _offerController(WidgetTester tester) {
 Future<void> _selectDestinationOnMap(WidgetTester tester) async {
   final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
   map.onTap!(const LatLng(-6.4880, -76.3600));
+  await _flushAsync(tester);
+}
+
+/// ORIGIN-ADDRESS-R1: mismo botón que ya existía para recentrar el
+/// mapa — dispara `_loadCurrentLocation()` de nuevo, con el siguiente
+/// punto de `locationSequence` si el test lo configuró.
+Future<void> _tapCenterOnMyLocation(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Centrar en mi ubicación'));
   await _flushAsync(tester);
 }
 
@@ -789,8 +946,11 @@ Future<void> _pumpHomeScreen(
   required FareRepository fareRepository,
   required RideRepository rideRepository,
   PlacesRepository? placesRepository,
+  List<Position>? locationSequence,
 }) async {
-  GeolocatorPlatform.instance = _FakeGeolocatorPlatform();
+  GeolocatorPlatform.instance = _FakeGeolocatorPlatform(
+    positions: locationSequence,
+  );
 
   await tester.pumpWidget(
     ProviderScope(
@@ -865,7 +1025,33 @@ class _FakePlacesRepository extends PlacesRepository {
   }
 }
 
+Position _buildPosition(double latitude, double longitude) {
+  return Position(
+    latitude: latitude,
+    longitude: longitude,
+    timestamp: DateTime.now(),
+    accuracy: 5,
+    altitude: 0,
+    altitudeAccuracy: 0,
+    heading: 0,
+    headingAccuracy: 0,
+    speed: 0,
+    speedAccuracy: 0,
+  );
+}
+
 class _FakeGeolocatorPlatform extends GeolocatorPlatform {
+  /// ORIGIN-ADDRESS-R1: por defecto (`positions == null`) siempre
+  /// devuelve el mismo punto fijo, igual que antes de este campo —
+  /// ningún test existente cambia de comportamiento. Cuando se pasa
+  /// una secuencia, cada llamada devuelve el siguiente punto (se
+  /// queda en el último una vez agotada), para simular al Passenger
+  /// moviéndose entre aperturas/taps de "centrar en mi ubicación".
+  _FakeGeolocatorPlatform({this.positions});
+
+  final List<Position>? positions;
+  int _callIndex = 0;
+
   @override
   Future<bool> isLocationServiceEnabled() async => true;
 
@@ -877,18 +1063,17 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform {
   Future<Position> getCurrentPosition({
     LocationSettings? locationSettings,
   }) async {
-    return Position(
-      latitude: -6.4877,
-      longitude: -76.3599,
-      timestamp: DateTime.now(),
-      accuracy: 5,
-      altitude: 0,
-      altitudeAccuracy: 0,
-      heading: 0,
-      headingAccuracy: 0,
-      speed: 0,
-      speedAccuracy: 0,
-    );
+    final queue = positions;
+
+    if (queue == null || queue.isEmpty) {
+      return _buildPosition(-6.4877, -76.3599);
+    }
+
+    final position = queue[_callIndex.clamp(0, queue.length - 1)];
+
+    _callIndex++;
+
+    return position;
   }
 }
 
@@ -900,6 +1085,8 @@ class _FakeFareRepository extends FareRepository {
     this.failFirstCall = false,
     this.holdRequests = false,
     this.destinationAddressOverrides,
+    this.originAddress = 'Calle Rioja 495, Tarapoto',
+    this.failOriginAddress = false,
   }) : super(Dio());
 
   String estimatedFare;
@@ -938,6 +1125,34 @@ class _FakeFareRepository extends FareRepository {
 
   void resolveCall(int index) {
     _pendingCompleters[index].complete();
+  }
+
+  /// ORIGIN-ADDRESS-R1: dirección que "resuelve" cada llamada a
+  /// `getOriginAddress`. Fija por defecto para no obligar a cada test
+  /// existente a conocer este flujo nuevo.
+  String originAddress;
+
+  /// Si es `true`, `getOriginAddress` lanza — simula un fallo de red
+  /// hacia el endpoint nuevo (nunca un fallo de Google, que el
+  /// backend ya absorbe con su propio fallback).
+  bool failOriginAddress;
+
+  int originAddressCallCount = 0;
+  final List<List<double>> requestedOriginCoordinates = [];
+
+  @override
+  Future<String> getOriginAddress({
+    required double latitude,
+    required double longitude,
+  }) async {
+    originAddressCallCount++;
+    requestedOriginCoordinates.add([latitude, longitude]);
+
+    if (failOriginAddress) {
+      throw Exception('Fallo simulado de red');
+    }
+
+    return originAddress;
   }
 
   @override

@@ -60,6 +60,22 @@ class _HomeScreenState
   static const String _manualDestinationPlaceholder =
       'Destino seleccionado en el mapa';
 
+  /// ORIGIN-ADDRESS-R1: distancia mínima, en metros, para considerar
+  /// que el GPS se movió a un lugar distinto y vale la pena resolver
+  /// una dirección de origen nueva. Por debajo de este umbral, la
+  /// nueva posición se trata como "el mismo punto" (jitter típico de
+  /// un GPS de celular en reposo) y se reutiliza
+  /// [_resolvedOriginAddress] sin llamar de nuevo al backend.
+  ///
+  /// Sin validar todavía en calle — mismo estado que
+  /// `_driverMarkerLargeJumpMetersThreshold` (300m, umbral de salto
+  /// grande del marcador del Driver, `ride_searching_screen.dart`,
+  /// R4.4B), que tampoco se probó en zona de señal GPS difícil.
+  /// Ajustar este valor si la prueba física muestra que 50m es
+  /// demasiado chico (parpadea con el jitter normal del GPS) o
+  /// demasiado grande (no actualiza al moverse una cuadra corta).
+  static const double _originAddressCacheDistanceMeters = 50;
+
   GoogleMapController? _mapController;
 
   final TextEditingController
@@ -78,6 +94,31 @@ class _HomeScreenState
 
   Position? _currentPosition;
   LatLng? _selectedDestination;
+
+  /// ORIGIN-ADDRESS-R1: dirección real del origen, resuelta apenas
+  /// hay GPS — independiente de la cotización. `null` mientras no se
+  /// resolvió ninguna todavía (se sigue mostrando el placeholder
+  /// existente 'Tu ubicación actual' en ese caso). Una vez resuelta,
+  /// se conserva la última dirección válida aunque el GPS se mueva de
+  /// nuevo — no parpadea a un estado "resolviendo" mientras llega la
+  /// dirección para la nueva posición.
+  String? _resolvedOriginAddress;
+
+  /// Posición GPS para la que se resolvió [_resolvedOriginAddress].
+  /// Permite decidir si una nueva posición cae dentro de
+  /// [_originAddressCacheDistanceMeters] del último punto ya resuelto
+  /// (mismo lugar: no vale la pena pagar otra llamada) o si el
+  /// pasajero se movió lo suficiente como para pedir una dirección
+  /// nueva.
+  LatLng? _resolvedOriginAddressPosition;
+
+  /// Generación de la última resolución de dirección de origen en
+  /// vuelo — mismo propósito que [_quoteRequestId]: si el GPS se
+  /// actualiza de nuevo (apertura + tap de "centrar en mi ubicación")
+  /// mientras una resolución anterior todavía no responde, una
+  /// respuesta tardía de esa llamada obsoleta no debe pisar el estado
+  /// de la más reciente.
+  int _originAddressRequestId = 0;
 
   String? _selectedDestinationAddress;
   String? _selectedDestinationName;
@@ -325,6 +366,10 @@ class _HomeScreenState
 
       _maybeAutoEstimateFare();
 
+      // Fire-and-forget: nunca bloquea el movimiento de cámara ni el
+      // resto de esta pantalla — ver `_resolveOriginAddress`.
+      unawaited(_resolveOriginAddress(position));
+
       await _moveCameraToCurrentLocation();
     } catch (error) {
       debugPrint(
@@ -345,6 +390,61 @@ class _HomeScreenState
           _locating = false;
         });
       }
+    }
+  }
+
+  /// ORIGIN-ADDRESS-R1: resuelve la dirección real de [position] sin
+  /// esperar a que el pasajero elija destino ni generar una
+  /// cotización (`GET fares/origin-address`, liviano, sin persistir
+  /// nada). Cachea por distancia: si [position] cae dentro de
+  /// [_originAddressCacheDistanceMeters] de la última posición ya
+  /// resuelta, no vuelve a llamar al backend. Nunca bloquea ni
+  /// muestra error si falla — la pantalla sigue mostrando el
+  /// placeholder existente ('Tu ubicación actual') hasta que llegue
+  /// la cotización real o una resolución futura tenga éxito.
+  Future<void> _resolveOriginAddress(
+    Position position,
+  ) async {
+    final newPoint = LatLng(
+      position.latitude,
+      position.longitude,
+    );
+
+    final cachedPoint = _resolvedOriginAddressPosition;
+
+    if (cachedPoint != null &&
+        _originAddressDistanceMeters(
+              cachedPoint,
+              newPoint,
+            ) <=
+            _originAddressCacheDistanceMeters) {
+      return;
+    }
+
+    final requestId = ++_originAddressRequestId;
+
+    try {
+      final address = await ref
+          .read(fareRepositoryProvider)
+          .getOriginAddress(
+            latitude: position.latitude,
+            longitude: position.longitude,
+          );
+
+      if (!mounted ||
+          requestId != _originAddressRequestId ||
+          address.trim().isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _resolvedOriginAddress = address;
+        _resolvedOriginAddressPosition = newPoint;
+      });
+    } catch (error) {
+      debugPrint(
+        'Error resolviendo dirección de origen: $error',
+      );
     }
   }
 
@@ -2202,9 +2302,12 @@ class _HomeScreenState
                                                   .trim()
                                                   .isNotEmpty
                                           ? quote.originAddress
-                                          : position == null
-                                              ? 'Esperando GPS...'
-                                              : 'Tu ubicación actual',
+                                          : _resolvedOriginAddress !=
+                                                  null
+                                              ? _resolvedOriginAddress!
+                                              : position == null
+                                                  ? 'Esperando GPS...'
+                                                  : 'Tu ubicación actual',
                                       style: const TextStyle(
                                         color: _primaryText,
                                         fontWeight:
@@ -2609,4 +2712,27 @@ class _HomeScreenState
       ),
     );
   }
+}
+
+/// Distancia en metros entre dos puntos GPS (fórmula de Haversine).
+/// Deliberadamente duplicada de `_driverMarkerDistanceMeters`
+/// (`ride_searching_screen.dart`, R4.4B) en vez de extraída a un
+/// util compartido — evita tocar ese código ya aprobado físicamente
+/// para una tarea (ORIGIN-ADDRESS-R1) que no necesita modificarlo.
+/// Sin dependencia nueva (`geolocator` no expone esto), mismo
+/// criterio que R4.4B.
+double _originAddressDistanceMeters(LatLng a, LatLng b) {
+  const earthRadiusMeters = 6371000.0;
+
+  final lat1 = a.latitude * pi / 180;
+  final lat2 = b.latitude * pi / 180;
+  final deltaLat = (b.latitude - a.latitude) * pi / 180;
+  final deltaLng = (b.longitude - a.longitude) * pi / 180;
+
+  final h =
+      sin(deltaLat / 2) * sin(deltaLat / 2) +
+      cos(lat1) * cos(lat2) * sin(deltaLng / 2) * sin(deltaLng / 2);
+  final c = 2 * atan2(sqrt(h), sqrt(1 - h));
+
+  return earthRadiusMeters * c;
 }
