@@ -17,6 +17,8 @@ import '../places/data/places_repository.dart';
 import '../places/domain/place_prediction.dart';
 import '../ride/data/ride_repository.dart';
 import '../ride/domain/fare_amount.dart';
+import '../ride/domain/ride_history_item.dart';
+import 'domain/suggested_destinations.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({
@@ -153,6 +155,15 @@ class _HomeScreenState
   List<PlacePrediction> _placePredictions =
       const [];
 
+  /// SUGGESTED-DESTINATIONS-R1: hasta [suggestedDestinationsCount]
+  /// destinos frecuentes del historial del pasajero, ya calculados por
+  /// `resolveSuggestedDestinations`. Vacía mientras carga o si el
+  /// pasajero no tiene historial suficiente — en ambos casos la
+  /// sección de sugerencias simplemente no se muestra, sin mensaje ni
+  /// espacio reservado.
+  List<RideHistoryItem> _suggestedDestinations =
+      const [];
+
   /*
    * Puntos decodificados de la polyline
    * devuelta por Google Routes.
@@ -198,6 +209,10 @@ class _HomeScreenState
   void initState() {
     super.initState();
     _loadCurrentLocation();
+
+    // Independiente del GPS: no necesita _currentPosition para pedir
+    // el historial. Se dispara una sola vez por apertura de Home.
+    unawaited(_loadSuggestedDestinations());
   }
 
   @override
@@ -860,6 +875,92 @@ class _HomeScreenState
         }
       },
     );
+  }
+
+  /// SUGGESTED-DESTINATIONS-R1: pide el historial completado del
+  /// pasajero una sola vez por apertura de Home y calcula las
+  /// sugerencias con `resolveSuggestedDestinations`. Best-effort: un
+  /// fallo de red no muestra error ni bloquea nada — la sección de
+  /// sugerencias simplemente no aparece, mismo criterio que el resto
+  /// de los enriquecimientos no críticos de esta pantalla (dirección
+  /// de origen preemptiva).
+  Future<void> _loadSuggestedDestinations() async {
+    try {
+      final history = await ref.read(rideRepositoryProvider).getHistory();
+
+      if (!mounted) {
+        return;
+      }
+
+      final suggestions = resolveSuggestedDestinations(history);
+
+      if (suggestions.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _suggestedDestinations = suggestions;
+      });
+    } catch (error) {
+      debugPrint(
+        'Error obteniendo destinos sugeridos: $error',
+      );
+    }
+  }
+
+  /// SUGGESTED-DESTINATIONS-R1: mismo camino que
+  /// `_selectPlacePrediction` a partir de fijar el destino — pero sin
+  /// las dos llamadas a Google (`autocomplete`+`getDetails`), porque
+  /// [suggestion] ya trae coordenadas reales resueltas por Backend
+  /// (`GET fares/origin-address` no interviene acá; esto es
+  /// `destinationLatitude`/`destinationLongitude` del historial).
+  Future<void> _selectSuggestedDestination(
+    RideHistoryItem suggestion,
+  ) async {
+    final latitude = suggestion.destinationLatitude;
+    final longitude = suggestion.destinationLongitude;
+
+    if (latitude == null || longitude == null) {
+      return;
+    }
+
+    final destination = LatLng(
+      latitude,
+      longitude,
+    );
+
+    _destinationSearchFocusNode.unfocus();
+
+    _destinationSearchController.text =
+        suggestion.destinationAddress;
+
+    _cancelQuoteExpiryTimer();
+
+    setState(() {
+      _selectedDestination =
+          destination;
+
+      _selectedDestinationName =
+          suggestion.destinationAddress;
+
+      _selectedDestinationAddress =
+          suggestion.destinationAddress;
+
+      _destinationIsManualSelection = false;
+
+      _placePredictions = const [];
+      _placeSearchMessage = null;
+      _placesSessionToken = null;
+
+      _quote = null;
+      _routePoints = const [];
+    });
+
+    await _moveCameraToDestination(
+      destination,
+    );
+
+    _maybeAutoEstimateFare();
   }
 
   Future<void> _selectPlacePrediction(
@@ -1598,6 +1699,68 @@ class _HomeScreenState
     );
   }
 
+  /// SUGGESTED-DESTINATIONS-R1: pastilla tocable de destino sugerido.
+  /// Deshabilitada (sin `onTap`, atenuada) mientras no hay GPS —
+  /// tocarla antes fijaría el destino igual, pero `_maybeAutoEstimateFare`
+  /// no dispara la cotización hasta tener origen, así que se evita
+  /// mostrar un control activo que no hace nada visible todavía.
+  Widget _buildSuggestedDestinationChip(
+    RideHistoryItem suggestion, {
+    required bool enabled,
+  }) {
+    return InkWell(
+      key: ValueKey(
+        'suggested-destination-${suggestion.rideId}',
+      ),
+      borderRadius: BorderRadius.circular(30),
+      onTap: enabled
+          ? () => _selectSuggestedDestination(suggestion)
+          : null,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.5,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 9,
+          ),
+          decoration: BoxDecoration(
+            color: _secondaryCream,
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: _border,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.history,
+                size: 16,
+                color: _darkGreen,
+              ),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 160,
+                ),
+                child: Text(
+                  suggestion.destinationAddress,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _primaryText,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final quote = _quote;
@@ -2178,6 +2341,23 @@ class _HomeScreenState
                         ),
                       ),
                     ),
+
+                    if (_selectedDestination == null &&
+                        _placePredictions.isEmpty &&
+                        _suggestedDestinations.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final suggestion in _suggestedDestinations)
+                            _buildSuggestedDestinationChip(
+                              suggestion,
+                              enabled: position != null,
+                            ),
+                        ],
+                      ),
+                    ],
 
                     if (_searchingPlaces) ...[
                       const SizedBox(

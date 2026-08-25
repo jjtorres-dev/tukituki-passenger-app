@@ -6,6 +6,7 @@ import '../../../core/network/api_client.dart';
 import '../domain/passenger_ride.dart';
 import '../domain/passenger_ride_offer.dart';
 import '../domain/passenger_ride_start_code.dart';
+import '../domain/ride_history_item.dart';
 import '../domain/ride_receipt.dart';
 
 final rideRepositoryProvider = Provider<RideRepository>((ref) {
@@ -148,6 +149,39 @@ class RideRepository {
     }
 
     return PassengerRide.fromJson(data);
+  }
+
+  /// SUGGESTED-DESTINATIONS-R1: viajes finalizados del pasajero, más
+  /// recientes primero (orden que ya aplica Backend). `status: 'COMPLETED'`
+  /// por defecto — un viaje cancelado/expirado nunca se visitó
+  /// realmente, no debería sugerirse como destino.
+  Future<List<RideHistoryItem>> getHistory({
+    String status = 'COMPLETED',
+    int limit = 50,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      'passenger/rides/history',
+      queryParameters: {'status': status, 'limit': limit},
+    );
+
+    final data = response.data;
+
+    if (data == null) {
+      throw Exception('El backend devolvió una respuesta vacía.');
+    }
+
+    final rawItems = data['items'];
+
+    if (rawItems is! List) {
+      return const [];
+    }
+
+    return rawItems
+        .whereType<Map>()
+        .map(
+          (item) => RideHistoryItem.fromJson(Map<String, dynamic>.from(item)),
+        )
+        .toList();
   }
 
   Future<PassengerRideStartCode> getStartCode(String rideId) async {

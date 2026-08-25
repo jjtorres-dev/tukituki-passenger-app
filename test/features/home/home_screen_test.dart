@@ -15,6 +15,7 @@ import 'package:passenger/features/places/domain/place_details.dart';
 import 'package:passenger/features/places/domain/place_prediction.dart';
 import 'package:passenger/features/ride/data/ride_repository.dart';
 import 'package:passenger/features/ride/domain/passenger_ride.dart';
+import 'package:passenger/features/ride/domain/ride_history_item.dart';
 
 void main() {
   late GeolocatorPlatform originalGeolocatorPlatform;
@@ -943,6 +944,184 @@ void main() {
       },
     );
   });
+
+  group('SUGGESTED-DESTINATIONS-R1', () {
+    testWidgets(
+      'sin historial, no se muestra ninguna sugerencia',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(rideRepository.getHistoryCallCount, 1);
+        expect(find.byIcon(Icons.history), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'con historial, muestra hasta suggestedDestinationsCount sugerencias, '
+      'la más frecuente primero',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final now = DateTime(2026, 8, 24, 12);
+        final rideRepository = _FakeRideRepository(
+          history: [
+            // UPEU: 3 viajes → la más frecuente.
+            _historyItem(
+              rideId: 'r1',
+              destinationAddress: 'UPEU',
+              requestedAt: now,
+            ),
+            _historyItem(
+              rideId: 'r2',
+              destinationAddress: 'UPEU',
+              requestedAt: now.subtract(const Duration(days: 1)),
+            ),
+            _historyItem(
+              rideId: 'r3',
+              destinationAddress: 'UPEU',
+              requestedAt: now.subtract(const Duration(days: 2)),
+            ),
+            // Terminal: 2 viajes → segunda más frecuente.
+            _historyItem(
+              rideId: 'r4',
+              destinationAddress: 'Terminal Terrestre',
+              requestedAt: now.subtract(const Duration(hours: 3)),
+            ),
+            _historyItem(
+              rideId: 'r5',
+              destinationAddress: 'Terminal Terrestre',
+              requestedAt: now.subtract(const Duration(days: 3)),
+            ),
+            // Plaza: 1 solo viaje → no entra (solo caben 2).
+            _historyItem(
+              rideId: 'r6',
+              destinationAddress: 'Plaza de Armas',
+              requestedAt: now.subtract(const Duration(hours: 1)),
+            ),
+          ],
+        );
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(find.text('UPEU'), findsOneWidget);
+        expect(find.text('Terminal Terrestre'), findsOneWidget);
+        expect(find.text('Plaza de Armas'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'toca una sugerencia: fija destino y dispara la cotización sin '
+      'autocomplete ni details',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository(
+          history: [
+            _historyItem(
+              rideId: 'r1',
+              destinationAddress: 'UPEU',
+              destinationLatitude: -6.5123,
+              destinationLongitude: -76.3712,
+              requestedAt: DateTime(2026, 8, 24),
+            ),
+          ],
+        );
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(fareRepository.callCount, 0);
+
+        await tester.tap(find.text('UPEU'));
+        await _flushAsync(tester);
+
+        expect(fareRepository.callCount, 1);
+        expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'la sugerencia queda deshabilitada mientras no hay GPS',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository(
+          history: [
+            _historyItem(
+              rideId: 'r1',
+              destinationAddress: 'UPEU',
+              requestedAt: DateTime(2026, 8, 24),
+            ),
+          ],
+        );
+        final geolocator = _FakeGeolocatorPlatform(hold: true);
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+          geolocatorPlatform: geolocator,
+        );
+
+        // Sin GPS todavía: la sugerencia ya cargó (no depende del
+        // GPS), pero tocarla no debe hacer nada.
+        expect(find.text('UPEU'), findsOneWidget);
+
+        await tester.tap(find.text('UPEU'));
+        await _flushAsync(tester);
+
+        expect(fareRepository.callCount, 0);
+
+        geolocator.releaseHold();
+        await _flushAsync(tester);
+
+        await tester.tap(find.text('UPEU'));
+        await _flushAsync(tester);
+
+        expect(fareRepository.callCount, 1);
+      },
+    );
+
+    testWidgets(
+      'una vez elegido un destino, deja de mostrarse la sección de '
+      'sugerencias',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository(
+          history: [
+            _historyItem(
+              rideId: 'r1',
+              destinationAddress: 'UPEU',
+              requestedAt: DateTime(2026, 8, 24),
+            ),
+          ],
+        );
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(find.text('UPEU'), findsOneWidget);
+
+        await _selectDestinationOnMap(tester);
+
+        expect(find.byIcon(Icons.history), findsNothing);
+      },
+    );
+  });
 }
 
 final _offerFieldFinder = find.byKey(const ValueKey('passenger-offer-field'));
@@ -1001,10 +1180,13 @@ Future<void> _pumpHomeScreen(
   required RideRepository rideRepository,
   PlacesRepository? placesRepository,
   List<Position>? locationSequence,
+  _FakeGeolocatorPlatform? geolocatorPlatform,
 }) async {
-  GeolocatorPlatform.instance = _FakeGeolocatorPlatform(
-    positions: locationSequence,
-  );
+  GeolocatorPlatform.instance =
+      geolocatorPlatform ??
+      _FakeGeolocatorPlatform(
+        positions: locationSequence,
+      );
 
   await tester.pumpWidget(
     ProviderScope(
@@ -1101,10 +1283,22 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform {
   /// una secuencia, cada llamada devuelve el siguiente punto (se
   /// queda en el último una vez agotada), para simular al Passenger
   /// moviéndose entre aperturas/taps de "centrar en mi ubicación".
-  _FakeGeolocatorPlatform({this.positions});
+  _FakeGeolocatorPlatform({this.positions, this.hold = false});
 
   final List<Position>? positions;
   int _callIndex = 0;
+
+  /// SUGGESTED-DESTINATIONS-R1: si es `true`, `getCurrentPosition`
+  /// queda pendiente hasta [releaseHold] — permite reproducir "el
+  /// pasajero todavía no tiene GPS" sin depender de timing real.
+  final bool hold;
+  final Completer<void> _holdCompleter = Completer<void>();
+
+  void releaseHold() {
+    if (!_holdCompleter.isCompleted) {
+      _holdCompleter.complete();
+    }
+  }
 
   @override
   Future<bool> isLocationServiceEnabled() async => true;
@@ -1117,6 +1311,10 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform {
   Future<Position> getCurrentPosition({
     LocationSettings? locationSettings,
   }) async {
+    if (hold) {
+      await _holdCompleter.future;
+    }
+
     final queue = positions;
 
     if (queue == null || queue.isEmpty) {
@@ -1286,9 +1484,23 @@ class _FakeFareRepository extends FareRepository {
 }
 
 class _FakeRideRepository extends RideRepository {
-  _FakeRideRepository() : super(Dio());
+  _FakeRideRepository({this.history = const []}) : super(Dio());
 
   final List<String> createRideCalls = [];
+
+  /// SUGGESTED-DESTINATIONS-R1: vacío por defecto — ningún test
+  /// existente ve sugerencias a menos que las pida explícitamente.
+  List<RideHistoryItem> history;
+  int getHistoryCallCount = 0;
+
+  @override
+  Future<List<RideHistoryItem>> getHistory({
+    String status = 'COMPLETED',
+    int limit = 50,
+  }) async {
+    getHistoryCallCount++;
+    return history;
+  }
 
   @override
   Future<PassengerRide> createRide({
@@ -1299,6 +1511,22 @@ class _FakeRideRepository extends RideRepository {
 
     return _ride(id: 'ride-created', passengerOfferFare: passengerOfferFare);
   }
+}
+
+RideHistoryItem _historyItem({
+  required String rideId,
+  required String destinationAddress,
+  double? destinationLatitude = -6.4877,
+  double? destinationLongitude = -76.3599,
+  required DateTime requestedAt,
+}) {
+  return RideHistoryItem(
+    rideId: rideId,
+    destinationAddress: destinationAddress,
+    destinationLatitude: destinationLatitude,
+    destinationLongitude: destinationLongitude,
+    requestedAt: requestedAt,
+  );
 }
 
 PassengerRide _ride({required String id, required String passengerOfferFare}) {
