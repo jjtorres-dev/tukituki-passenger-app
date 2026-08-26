@@ -56,6 +56,15 @@ import 'package:flutter/material.dart';
 ///   si el tono exacto cambia. Valores tomados literalmente de
 ///   `home_screen.dart` (`#8FA891`, etiqueta micro del marcador de
 ///   origen; `#B9C8BC`, texto de ayuda de la tarjeta de oferta).
+///
+/// Un color agregado en `HOME-DESIGN-R1` (2026-08-26), categoría nueva
+/// ("Superposición sobre el mapa", `sistema-de-diseno.md` sección 2):
+/// [lineaRuta], la línea de la ruta que se dibuja sobre el `GoogleMap`
+/// entre origen y destino. Decisión explícita de JuanJo: **no**
+/// reutiliza [acento] — es un color que se valida contra el mapa real,
+/// no contra el resto de la paleta de interfaz, y el valor ya en uso
+/// (`#5C8A17`) funciona sobre el mapa; forzarlo a [acento] lo
+/// oscurecería sin haber probado ese cambio en calle.
 class PassengerColors {
   const PassengerColors._();
 
@@ -95,4 +104,7 @@ class PassengerColors {
   // Texto sobre fondo oscuro — ver nota de clase.
   static const Color textoTenueSobreOscuro = Color(0xFF8FA891);
   static const Color textoSecundarioSobreOscuro = Color(0xFFB9C8BC);
+
+  // Superposición sobre el mapa — ver nota de clase.
+  static const Color lineaRuta = Color(0xFF5C8A17);
 }

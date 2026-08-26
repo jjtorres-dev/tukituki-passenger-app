@@ -31,18 +31,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  static const Color _darkGreen = Color(0xFF123B26);
-  static const Color _green = Color(0xFF1F7A3E);
-  static const Color _secondaryGreen = Color(0xFF5C8A17);
-  static const Color _ctaYellow = Color(0xFFFFC72C);
-  static const Color _cream = Color(0xFFFFF9EC);
-  static const Color _secondaryCream = Color(0xFFFBF7EA);
-  static const Color _border = Color(0xFFE7E0CB);
-  static const Color _softBorder = Color(0xFFEFE8D4);
-  static const Color _primaryText = Color(0xFF16241C);
-  static const Color _secondaryText = Color(0xFF7C8A79);
-  static const Color _destinationColor = Color(0xFFD8542C);
-
   static const LatLng _tarapotoCenter = LatLng(-6.4877, -76.3599);
   static const String _originMarkerAsset =
       'assets/images/passenger_origin_marker.png';
@@ -1306,7 +1294,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
         width: 6,
 
-        color: _secondaryGreen,
+        color: PassengerColors.lineaRuta,
 
         geodesic: false,
 
@@ -1750,12 +1738,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 17, color: _ctaYellow),
+          Icon(icon, size: 17, color: PassengerColors.acento),
           const SizedBox(width: 6),
           Text(
             label,
             style: const TextStyle(
-              color: Colors.white,
+              color: PassengerColors.blanco,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -1782,14 +1770,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
-            color: _secondaryCream,
+            color: PassengerColors.crema,
             borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: _border),
+            border: Border.all(color: PassengerColors.bordeSuave),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.history, size: 16, color: _darkGreen),
+              const Icon(
+                Icons.history,
+                size: 16,
+                color: PassengerColors.verdeMarca,
+              ),
               const SizedBox(width: 6),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 160),
@@ -1798,7 +1790,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: _primaryText,
+                    color: PassengerColors.textoPrimario,
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -1882,10 +1874,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final ctaShowsProgress = _loading || _requestingRide;
     final ctaButtonStyle = FilledButton.styleFrom(
-      backgroundColor: _ctaYellow,
-      foregroundColor: _darkGreen,
-      disabledBackgroundColor: _softBorder,
-      disabledForegroundColor: _secondaryText,
+      backgroundColor: PassengerColors.amarilloCTA,
+      foregroundColor: PassengerColors.verdeMarca,
+      disabledBackgroundColor: PassengerColors.bordeSuave,
+      disabledForegroundColor: PassengerColors.textoSecundario,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)),
       textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
     );
@@ -1898,7 +1890,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         systemStatusBarContrastEnforced: false,
       ),
       child: Scaffold(
-        backgroundColor: _cream,
+        backgroundColor: PassengerColors.crema,
         resizeToAvoidBottomInset: true,
         body: Column(
           children: [
@@ -2193,7 +2185,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
-            color: _darkGreen,
+            color: PassengerColors.verdeMarca,
             borderRadius: BorderRadius.circular(11),
             boxShadow: [
               BoxShadow(
@@ -2217,7 +2209,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       style: TextStyle(
                         fontSize: 8,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF8FA891),
+                        color: PassengerColors.textoTenueSobreOscuro,
                         letterSpacing: 0.4,
                       ),
                     ),
@@ -2229,20 +2221,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
-                        color: Colors.white,
+                        color: PassengerColors.blanco,
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
-              const Icon(Icons.chevron_right, size: 15, color: _ctaYellow),
+              const Icon(
+                Icons.chevron_right,
+                size: 15,
+                color: PassengerColors.acento,
+              ),
             ],
           ),
         ),
         CustomPaint(
           size: const Size(12, 6),
-          painter: _MarkerPointerPainter(color: _darkGreen),
+          painter: _MarkerPointerPainter(color: PassengerColors.verdeMarca),
         ),
       ],
     );
@@ -2256,7 +2252,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: PassengerColors.blanco,
         borderRadius: BorderRadius.circular(13),
         boxShadow: [
           BoxShadow(
@@ -2270,7 +2266,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         tooltip: 'Cerrar sesión',
         onPressed: _logout,
         padding: EdgeInsets.zero,
-        color: _primaryText,
+        color: PassengerColors.textoPrimario,
         icon: const Icon(Icons.menu),
       ),
     );
@@ -2280,8 +2276,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return FloatingActionButton.small(
       heroTag: 'passenger-location',
       tooltip: 'Centrar en mi ubicación',
-      backgroundColor: _ctaYellow,
-      foregroundColor: _darkGreen,
+      backgroundColor: PassengerColors.amarilloCTA,
+      foregroundColor: PassengerColors.verdeMarca,
       disabledElevation: 0,
       onPressed: _locating ? null : _recenterOnCurrentLocation,
       child: _locating
@@ -2289,7 +2285,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               padding: EdgeInsets.all(10),
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: _darkGreen,
+                color: PassengerColors.verdeMarca,
               ),
             )
           : const Icon(Icons.my_location),
@@ -2323,7 +2319,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: DecoratedBox(
         decoration: const BoxDecoration(
-          color: _cream,
+          color: PassengerColors.crema,
           borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
         ),
         child: Column(
@@ -2336,7 +2332,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 width: 42,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: _border,
+                  color: PassengerColors.bordeSuave,
                   borderRadius: BorderRadius.circular(20),
                 ),
               ),
@@ -2380,7 +2376,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         const Text(
           '¿A dónde vamos?',
           style: TextStyle(
-            color: _darkGreen,
+            color: PassengerColors.verdeMarca,
             fontSize: 28,
             fontWeight: FontWeight.w800,
             letterSpacing: -0.7,
@@ -2392,23 +2388,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         if (_locationMessage != null)
           Container(
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF0E8),
+              color: PassengerColors.fondoAviso,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: _destinationColor.withValues(alpha: 0.22),
+                color: PassengerColors.aviso.withValues(alpha: 0.22),
               ),
             ),
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
-                  const Icon(Icons.location_off, color: _destinationColor),
+                  const Icon(Icons.location_off, color: PassengerColors.aviso),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       _locationMessage!,
                       style: const TextStyle(
-                        color: _primaryText,
+                        color: PassengerColors.textoPrimario,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -2431,10 +2427,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           decoration: InputDecoration(
             hintText: 'Buscar destino',
             hintStyle: const TextStyle(
-              color: _secondaryText,
+              color: PassengerColors.textoSecundario,
               fontWeight: FontWeight.w500,
             ),
-            prefixIcon: const Icon(Icons.search, color: _darkGreen),
+            prefixIcon: const Icon(
+              Icons.search,
+              color: PassengerColors.verdeMarca,
+            ),
             suffixIcon: _loadingPlaceDetails
                 ? const Padding(
                     padding: EdgeInsets.all(14),
@@ -2448,26 +2447,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   )
                 : null,
             filled: true,
-            fillColor: _secondaryCream,
+            fillColor: PassengerColors.crema,
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
               vertical: 14,
             ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(color: _border),
+              borderSide: const BorderSide(color: PassengerColors.bordeSuave),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(color: _border),
+              borderSide: const BorderSide(color: PassengerColors.bordeSuave),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(color: _green, width: 1.5),
+              borderSide: const BorderSide(
+                color: PassengerColors.acento,
+                width: 1.5,
+              ),
             ),
             disabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(color: _softBorder),
+              borderSide: const BorderSide(color: PassengerColors.bordeSuave),
             ),
           ),
         ),
@@ -2492,8 +2494,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         if (_searchingPlaces) ...[
           const SizedBox(height: 12),
           const LinearProgressIndicator(
-            color: _green,
-            backgroundColor: _softBorder,
+            color: PassengerColors.acento,
+            backgroundColor: PassengerColors.bordeSuave,
           ),
         ],
 
@@ -2501,7 +2503,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           const SizedBox(height: 12),
           Text(
             _placeSearchMessage!,
-            style: const TextStyle(color: _secondaryText),
+            style: const TextStyle(color: PassengerColors.textoSecundario),
           ),
         ],
 
@@ -2509,11 +2511,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           const SizedBox(height: 8),
           Card(
             margin: EdgeInsets.zero,
-            color: _secondaryCream,
+            color: PassengerColors.crema,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: _border),
+              side: const BorderSide(color: PassengerColors.bordeSuave),
             ),
             clipBehavior: Clip.antiAlias,
             child: Column(
@@ -2526,7 +2528,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ListTile(
                     leading: const Icon(
                       Icons.location_on,
-                      color: _destinationColor,
+                      color: PassengerColors.destino,
                     ),
                     title: Text(_placePredictions[index].primaryText),
                     subtitle: _placePredictions[index].secondaryText.isEmpty
@@ -2545,7 +2547,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               _selectPlacePrediction(_placePredictions[index]),
                   ),
                   if (index != _placePredictions.length - 1)
-                    const Divider(height: 1, color: _softBorder),
+                    const Divider(height: 1, color: PassengerColors.bordeSuave),
                 ],
               ],
             ),
@@ -2557,9 +2559,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: _secondaryCream,
+            color: PassengerColors.crema,
             borderRadius: BorderRadius.circular(17),
-            border: Border.all(color: _border),
+            border: Border.all(color: PassengerColors.bordeSuave),
           ),
           child: Column(
             children: [
@@ -2570,12 +2572,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     width: 20,
                     height: 20,
                     decoration: const BoxDecoration(
-                      color: _green,
+                      color: PassengerColors.acento,
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
                       Icons.my_location,
-                      color: Colors.white,
+                      color: PassengerColors.blanco,
                       size: 12,
                     ),
                   ),
@@ -2587,7 +2589,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const Text(
                           'Origen',
                           style: TextStyle(
-                            color: _secondaryText,
+                            color: PassengerColors.textoSecundario,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
@@ -2596,7 +2598,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         Text(
                           _originAddressLabel(quote, position),
                           style: const TextStyle(
-                            color: _primaryText,
+                            color: PassengerColors.textoPrimario,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -2616,7 +2618,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         width: 2,
                         height: 4,
                         margin: const EdgeInsets.symmetric(vertical: 2),
-                        color: _border,
+                        color: PassengerColors.bordeSuave,
                       ),
                     ),
                   ),
@@ -2627,7 +2629,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 children: [
                   const Icon(
                     Icons.location_on,
-                    color: _destinationColor,
+                    color: PassengerColors.destino,
                     size: 22,
                   ),
                   const SizedBox(width: 10),
@@ -2638,7 +2640,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const Text(
                           'Destino',
                           style: TextStyle(
-                            color: _secondaryText,
+                            color: PassengerColors.textoSecundario,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
@@ -2650,7 +2652,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               : _selectedDestinationName ??
                                     'Destino seleccionado',
                           style: const TextStyle(
-                            color: _primaryText,
+                            color: PassengerColors.textoPrimario,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -2661,7 +2663,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           Text(
                             _selectedDestinationAddress!,
                             style: const TextStyle(
-                              color: _secondaryText,
+                              color: PassengerColors.textoSecundario,
                               fontSize: 12.5,
                             ),
                           ),
@@ -2676,7 +2678,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       visualDensity: VisualDensity.compact,
                       icon: const Icon(
                         Icons.close,
-                        color: _secondaryText,
+                        color: PassengerColors.textoSecundario,
                         size: 20,
                       ),
                     ),
@@ -2691,11 +2693,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
           Container(
             decoration: BoxDecoration(
-              color: _darkGreen,
+              color: PassengerColors.verdeMarca,
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: _darkGreen.withValues(alpha: 0.16),
+                  color: PassengerColors.verdeMarca.withValues(alpha: 0.16),
                   blurRadius: 18,
                   offset: const Offset(0, 8),
                 ),
@@ -2709,7 +2711,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   const Text(
                     '¿Cuánto quieres ofrecer?',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: PassengerColors.blanco,
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                     ),
@@ -2729,20 +2731,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                      color: _primaryText,
+                      color: PassengerColors.textoPrimario,
                       fontSize: 27,
                       fontWeight: FontWeight.w800,
                     ),
                     decoration: InputDecoration(
                       prefixText: 'S/ ',
                       prefixStyle: const TextStyle(
-                        color: _secondaryText,
+                        color: PassengerColors.textoSecundario,
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
                       ),
                       hintText: '5.00',
                       filled: true,
-                      fillColor: _cream,
+                      fillColor: PassengerColors.crema,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 13,
@@ -2758,7 +2760,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
                         borderSide: const BorderSide(
-                          color: _ctaYellow,
+                          color: PassengerColors.acento,
                           width: 2,
                         ),
                       ),
@@ -2767,7 +2769,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         borderSide: BorderSide.none,
                       ),
                       helperText: 'Este es el monto que verán los conductores.',
-                      helperStyle: const TextStyle(color: Color(0xFFB9C8BC)),
+                      helperStyle: const TextStyle(
+                        color: PassengerColors.textoSecundarioSobreOscuro,
+                      ),
                     ),
                   ),
 
@@ -2801,8 +2805,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             : Icons.schedule,
                         size: 16,
                         color: quoteExpired
-                            ? _ctaYellow
-                            : const Color(0xFFB9C8BC),
+                            ? PassengerColors.aviso
+                            : PassengerColors.textoSecundarioSobreOscuro,
                       ),
                       const SizedBox(width: 7),
                       Flexible(
@@ -2814,8 +2818,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: quoteExpired
-                                ? _ctaYellow
-                                : const Color(0xFFB9C8BC),
+                                ? PassengerColors.aviso
+                                : PassengerColors.textoSecundarioSobreOscuro,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -2849,8 +2853,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }) {
     return Container(
       decoration: const BoxDecoration(
-        color: _cream,
-        border: Border(top: BorderSide(color: _softBorder)),
+        color: PassengerColors.crema,
+        border: Border(top: BorderSide(color: PassengerColors.bordeSuave)),
       ),
       child: SafeArea(
         top: false,
@@ -2877,7 +2881,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             height: 19,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: _darkGreen,
+                              color: PassengerColors.verdeMarca,
                             ),
                           )
                         : Icon(ctaIcon),
