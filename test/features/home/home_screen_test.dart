@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:passenger/core/theme/passenger_colors.dart';
 import 'package:passenger/features/fare/data/fare_repository.dart';
 import 'package:passenger/features/fare/domain/fare_estimate.dart';
 import 'package:passenger/features/home/home_screen.dart';
@@ -37,7 +39,32 @@ void main() {
       tester,
       fareRepository: fareRepository,
       rideRepository: rideRepository,
+      mediaQueryData: const MediaQueryData(
+        viewPadding: EdgeInsets.only(top: 24),
+      ),
     );
+
+    final statusBarBackground = tester.widget<SizedBox>(
+      find.byKey(const ValueKey('home-status-bar-background')),
+    );
+    expect(statusBarBackground.height, 24);
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('home-status-bar-background')))
+          .width,
+      tester.getSize(find.byType(Scaffold)).width,
+    );
+    expect(
+      (statusBarBackground.child! as ColoredBox).color,
+      PassengerColors.verdeMarca,
+    );
+    expect(tester.getTopLeft(find.byType(GoogleMap)).dy, 24);
+    expect(tester.getTopLeft(find.byTooltip('Cerrar sesión')).dy, 38);
+
+    final systemUiRegion = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+      find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+    );
+    expect(systemUiRegion.value.statusBarIconBrightness, Brightness.light);
 
     // Aparece dos veces por diseño: la tarjeta de destino y el CTA.
     expect(find.text('Selecciona un destino'), findsNWidgets(2));
@@ -145,45 +172,40 @@ void main() {
     },
   );
 
-  testWidgets(
-    'G4B-R5.1-8: si la cotización automática falla, el CTA dice '
-    '"Reintentar" (nunca "Calcular tarifa"/"Calcular nueva tarifa") y '
-    'el flujo continúa',
-    (tester) async {
-      final fareRepository = _FakeFareRepository(
-        estimatedFare: '7.00',
-        failFirstCall: true,
-      );
-      final rideRepository = _FakeRideRepository();
+  testWidgets('G4B-R5.1-8: si la cotización automática falla, el CTA dice '
+      '"Reintentar" (nunca "Calcular tarifa"/"Calcular nueva tarifa") y '
+      'el flujo continúa', (tester) async {
+    final fareRepository = _FakeFareRepository(
+      estimatedFare: '7.00',
+      failFirstCall: true,
+    );
+    final rideRepository = _FakeRideRepository();
 
-      await _pumpHomeScreen(
-        tester,
-        fareRepository: fareRepository,
-        rideRepository: rideRepository,
-      );
+    await _pumpHomeScreen(
+      tester,
+      fareRepository: fareRepository,
+      rideRepository: rideRepository,
+    );
 
-      await _selectDestinationOnMap(tester);
+    await _selectDestinationOnMap(tester);
 
-      // La solicitud automática falló: sin quote, pero con un CTA
-      // accionable y neutral para reintentar.
-      expect(fareRepository.callCount, 1);
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsNothing);
-      expect(find.text('Calcular tarifa'), findsNothing);
-      expect(find.text('Calcular nueva tarifa'), findsNothing);
-      expect(find.text('Reintentar'), findsOneWidget);
+    // La solicitud automática falló: sin quote, pero con un CTA
+    // accionable y neutral para reintentar.
+    expect(fareRepository.callCount, 1);
+    expect(find.text('¿Cuánto quieres ofrecer?'), findsNothing);
+    expect(find.text('Calcular tarifa'), findsNothing);
+    expect(find.text('Calcular nueva tarifa'), findsNothing);
+    expect(find.text('Reintentar'), findsOneWidget);
 
-      final retryButton = tester.widget<FilledButton>(
-        find.byType(FilledButton),
-      );
-      expect(retryButton.onPressed, isNotNull);
+    final retryButton = tester.widget<FilledButton>(find.byType(FilledButton));
+    expect(retryButton.onPressed, isNotNull);
 
-      await tester.tap(find.byType(FilledButton));
-      await _flushAsync(tester);
+    await tester.tap(find.byType(FilledButton));
+    await _flushAsync(tester);
 
-      expect(fareRepository.callCount, 2);
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
-    },
-  );
+    expect(fareRepository.callCount, 2);
+    expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+  });
 
   testWidgets('G4B-R3-1/2: "Precio recomendado TukiTuki" y el monto grande '
       'no aparecen tras cotizar', (tester) async {
@@ -323,95 +345,93 @@ void main() {
     },
   );
 
-  testWidgets(
-    'G4B-R5.1-6/7: si la cotización vence mientras el Passenger ya '
-    'escribió su oferta, se renueva sola y preserva ese monto',
-    (tester) async {
-      final fareRepository = _FakeFareRepository(
-        estimatedFare: '7.00',
-        firstQuoteTtl: const Duration(seconds: 2),
-      );
-      final rideRepository = _FakeRideRepository();
+  testWidgets('G4B-R5.1-6/7: si la cotización vence mientras el Passenger ya '
+      'escribió su oferta, se renueva sola y preserva ese monto', (
+    tester,
+  ) async {
+    final fareRepository = _FakeFareRepository(
+      estimatedFare: '7.00',
+      firstQuoteTtl: const Duration(seconds: 2),
+    );
+    final rideRepository = _FakeRideRepository();
 
-      await _pumpHomeScreen(
-        tester,
-        fareRepository: fareRepository,
-        rideRepository: rideRepository,
-      );
+    await _pumpHomeScreen(
+      tester,
+      fareRepository: fareRepository,
+      rideRepository: rideRepository,
+    );
 
-      await _selectDestinationOnMap(tester);
-      expect(fareRepository.callCount, 1);
+    await _selectDestinationOnMap(tester);
+    expect(fareRepository.callCount, 1);
 
-      await tester.enterText(_offerFieldFinder, '8.00');
-      await tester.pump();
-      expect(_offerController(tester).text, '8.00');
+    await tester.enterText(_offerFieldFinder, '8.00');
+    await tester.pump();
+    expect(_offerController(tester).text, '8.00');
 
-      // Deja vencer la cotización: el Timer interno dispara la
-      // renovación solo, sin ningún tap del Passenger.
-      await tester.pump(const Duration(seconds: 3));
-      await _flushAsync(tester);
+    // Deja vencer la cotización: el Timer interno dispara la
+    // renovación solo, sin ningún tap del Passenger.
+    await tester.pump(const Duration(seconds: 3));
+    await _flushAsync(tester);
 
-      expect(fareRepository.callCount, 2);
-      expect(find.text('Calcular tarifa'), findsNothing);
-      expect(find.text('Calcular nueva tarifa'), findsNothing);
-      expect(find.text('Reintentar'), findsNothing);
-      // La oferta escrita sobrevive intacta a la renovación interna.
-      expect(_offerController(tester).text, '8.00');
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
-    },
-  );
+    expect(fareRepository.callCount, 2);
+    expect(find.text('Calcular tarifa'), findsNothing);
+    expect(find.text('Calcular nueva tarifa'), findsNothing);
+    expect(find.text('Reintentar'), findsNothing);
+    // La oferta escrita sobrevive intacta a la renovación interna.
+    expect(_offerController(tester).text, '8.00');
+    expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+  });
 
-  testWidgets(
-    'G4B-R5.1-4/5: cambiar de destino con una request pendiente — la '
-    'respuesta vieja NUNCA gana, solo el destino final queda como quote',
-    (tester) async {
-      final fareRepository = _FakeFareRepository(
-        estimatedFare: '7.00',
-        holdRequests: true,
-      );
-      final rideRepository = _FakeRideRepository();
+  testWidgets('G4B-R5.1-4/5: cambiar de destino con una request pendiente — la '
+      'respuesta vieja NUNCA gana, solo el destino final queda como quote', (
+    tester,
+  ) async {
+    final fareRepository = _FakeFareRepository(
+      estimatedFare: '7.00',
+      holdRequests: true,
+    );
+    final rideRepository = _FakeRideRepository();
 
-      await _pumpHomeScreen(
-        tester,
-        fareRepository: fareRepository,
-        rideRepository: rideRepository,
-      );
+    await _pumpHomeScreen(
+      tester,
+      fareRepository: fareRepository,
+      rideRepository: rideRepository,
+    );
 
-      final dynamic state = tester.state(find.byType(HomeScreen));
+    final dynamic state = tester.state(find.byType(HomeScreen));
 
-      // Destino A: dispara estimate(A), queda pendiente (holdRequests).
-      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
-      map.onTap!(const LatLng(-6.4880, -76.3600));
-      await tester.pump();
+    // Destino A: dispara estimate(A), queda pendiente (holdRequests).
+    final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+    map.onTap!(const LatLng(-6.4880, -76.3600));
+    await tester.pump();
 
-      expect(fareRepository.callCount, 1);
-      expect(state.debugQuoteId, isNull);
+    expect(fareRepository.callCount, 1);
+    expect(state.debugQuoteId, isNull);
 
-      // Cambia a B ANTES de que A responda: debe disparar una NUEVA
-      // solicitud de inmediato, no esperar a que A termine.
-      map.onTap!(const LatLng(-6.5000, -76.4000));
-      await tester.pump();
+    // Cambia a B ANTES de que A responda: debe disparar una NUEVA
+    // solicitud de inmediato, no esperar a que A termine.
+    map.onTap!(const LatLng(-6.5000, -76.4000));
+    await tester.pump();
 
-      expect(fareRepository.callCount, 2);
+    expect(fareRepository.callCount, 2);
 
-      // Responde A (la vieja) DESPUÉS de que B ya está en vuelo.
-      fareRepository.resolveCall(0);
-      await _flushAsync(tester);
+    // Responde A (la vieja) DESPUÉS de que B ya está en vuelo.
+    fareRepository.resolveCall(0);
+    await _flushAsync(tester);
 
-      // La respuesta de A quedó descartada por completo: sigue sin
-      // quote (B todavía no respondió) y sin oferta visible.
-      expect(state.debugQuoteId, isNull);
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsNothing);
+    // La respuesta de A quedó descartada por completo: sigue sin
+    // quote (B todavía no respondió) y sin oferta visible.
+    expect(state.debugQuoteId, isNull);
+    expect(find.text('¿Cuánto quieres ofrecer?'), findsNothing);
 
-      // Responde B.
-      fareRepository.resolveCall(1);
-      await _flushAsync(tester);
+    // Responde B.
+    fareRepository.resolveCall(1);
+    await _flushAsync(tester);
 
-      // Solo B quedó como quote vigente (segunda solicitud = quote-2).
-      expect(state.debugQuoteId, 'quote-2');
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
-    },
-  );
+    // Solo B quedó como quote vigente (segunda solicitud = quote-2).
+    expect(state.debugQuoteId, 'quote-2');
+    expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+  });
 
   testWidgets(
     'G4B-R5.2-1: destino manual muestra la dirección real resuelta por '
@@ -578,47 +598,44 @@ void main() {
     },
   );
 
-  testWidgets(
-    'G4B-R5.2-4: respuesta obsoleta de A no puede sobrescribir la '
-    'dirección real de B',
-    (tester) async {
-      final fareRepository = _FakeFareRepository(
-        estimatedFare: '7.00',
-        holdRequests: true,
-        destinationAddressOverrides: const ['Dirección A', 'Dirección B'],
-      );
-      final rideRepository = _FakeRideRepository();
+  testWidgets('G4B-R5.2-4: respuesta obsoleta de A no puede sobrescribir la '
+      'dirección real de B', (tester) async {
+    final fareRepository = _FakeFareRepository(
+      estimatedFare: '7.00',
+      holdRequests: true,
+      destinationAddressOverrides: const ['Dirección A', 'Dirección B'],
+    );
+    final rideRepository = _FakeRideRepository();
 
-      await _pumpHomeScreen(
-        tester,
-        fareRepository: fareRepository,
-        rideRepository: rideRepository,
-      );
+    await _pumpHomeScreen(
+      tester,
+      fareRepository: fareRepository,
+      rideRepository: rideRepository,
+    );
 
-      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+    final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
 
-      map.onTap!(const LatLng(-6.4880, -76.3600)); // A
-      await tester.pump();
+    map.onTap!(const LatLng(-6.4880, -76.3600)); // A
+    await tester.pump();
 
-      map.onTap!(const LatLng(-6.5000, -76.4000)); // B
-      await tester.pump();
+    map.onTap!(const LatLng(-6.5000, -76.4000)); // B
+    await tester.pump();
 
-      expect(fareRepository.callCount, 2);
+    expect(fareRepository.callCount, 2);
 
-      // Responde A (la vieja) primero.
-      fareRepository.resolveCall(0);
-      await _flushAsync(tester);
+    // Responde A (la vieja) primero.
+    fareRepository.resolveCall(0);
+    await _flushAsync(tester);
 
-      expect(find.text('Dirección A'), findsNothing);
+    expect(find.text('Dirección A'), findsNothing);
 
-      // Responde B.
-      fareRepository.resolveCall(1);
-      await _flushAsync(tester);
+    // Responde B.
+    fareRepository.resolveCall(1);
+    await _flushAsync(tester);
 
-      expect(find.text('Dirección B'), findsOneWidget);
-      expect(find.text('Dirección A'), findsNothing);
-    },
-  );
+    expect(find.text('Dirección B'), findsOneWidget);
+    expect(find.text('Dirección A'), findsNothing);
+  });
 
   testWidgets(
     'G4B-R5.2-5: si Backend no resuelve una dirección real, se conserva '
@@ -742,6 +759,52 @@ void main() {
     },
   );
 
+  testWidgets(
+    'HOME-LAYOUT-R1: el CTA es alcanzable con teclado abierto y la hoja '
+    'en su estado más alto (destino + cotización + oferta), sin scroll '
+    'manual — mismo patrón que el test equivalente de login/registro, '
+    'pero sin `ensureVisible`: el CTA vive fuera de la región '
+    'scrolleable de la hoja',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetViewInsets);
+
+      for (final size in [const Size(360, 640), const Size(390, 844)]) {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository();
+
+        tester.view.physicalSize = size;
+        tester.view.viewInsets = const FakeViewPadding();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        await _selectDestinationOnMap(tester);
+        await tester.enterText(_offerFieldFinder, '8.00');
+        await tester.pump();
+
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        await tester.pumpAndSettle();
+
+        final cta = find.text('Ofrecer y buscar conductor');
+        final ctaRect = tester.getRect(cta);
+        final keyboardTop = size.height - 300;
+
+        expect(cta, findsOneWidget);
+        expect(ctaRect.top, greaterThanOrEqualTo(0));
+        expect(ctaRect.bottom, lessThanOrEqualTo(keyboardTop));
+        expect(tester.takeException(), isNull);
+      }
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   group('ORIGIN-ADDRESS-R1', () {
     testWidgets(
       'resuelve y muestra la dirección real de origen apenas hay GPS, '
@@ -765,10 +828,11 @@ void main() {
           -76.3599,
         ]);
 
-        expect(
-          find.text('Calle Rioja 495, Tarapoto'),
-          findsOneWidget,
-        );
+        // HOME-LAYOUT-R1: la tarjeta origen/destino de la hoja sigue
+        // mostrando la dirección completa. La etiqueta del marcador
+        // flotante muestra la versión corta (`_shortAddressLabel`,
+        // recorte por coma) — ver el grupo de tests dedicado más abajo.
+        expect(find.text('Calle Rioja 495, Tarapoto'), findsOneWidget);
         expect(find.text('Tu ubicación actual'), findsNothing);
 
         // Sin destino, jamás se dispara una cotización — la dirección
@@ -777,13 +841,166 @@ void main() {
       },
     );
 
+    testWidgets('si falla la resolución, no rompe la pantalla y conserva el '
+        'placeholder existente', (tester) async {
+      final fareRepository = _FakeFareRepository(
+        estimatedFare: '7.00',
+        failOriginAddress: true,
+      );
+      final rideRepository = _FakeRideRepository();
+
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+      );
+
+      expect(fareRepository.originAddressCallCount, 1);
+      // HOME-LAYOUT-R1: aparece en la etiqueta del marcador y en la
+      // tarjeta origen/destino de la hoja.
+      expect(find.text('Tu ubicación actual'), findsNWidgets(2));
+
+      // La pantalla sigue funcional: el CTA de destino sigue ahí.
+      expect(find.text('Selecciona un destino'), findsNWidgets(2));
+    });
+
+    testWidgets('la dirección real de la cotización siempre gana sobre la '
+        'resuelta preemptivamente', (tester) async {
+      final fareRepository = _FakeFareRepository(
+        estimatedFare: '7.00',
+        originAddress: 'Preemptiva: Jr. Lima 250',
+      );
+      final rideRepository = _FakeRideRepository();
+
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+      );
+
+      // HOME-LAYOUT-R1: aparece en la etiqueta del marcador y en la
+      // tarjeta origen/destino de la hoja.
+      expect(find.text('Preemptiva: Jr. Lima 250'), findsNWidgets(2));
+
+      await _selectDestinationOnMap(tester);
+
+      // La cotización real (fake fija su propio originAddress) pisa
+      // la dirección preemptiva, sin ambigüedad de prioridad.
+      expect(find.text('Preemptiva: Jr. Lima 250'), findsNothing);
+      expect(fareRepository.callCount, 1);
+    });
+
+    testWidgets('dentro del umbral de cacheo por distancia, no vuelve a llamar '
+        'al backend', (tester) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository();
+
+      // Segundo punto a ~5m del primero — muy por debajo de los 50m
+      // del umbral (~0.00005° de latitud ya son unos 5.5m en esta
+      // latitud).
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+        locationSequence: [
+          _buildPosition(-6.4877, -76.3599),
+          _buildPosition(-6.48775, -76.3599),
+        ],
+      );
+
+      expect(fareRepository.originAddressCallCount, 1);
+
+      await _tapCenterOnMyLocation(tester);
+
+      expect(fareRepository.originAddressCallCount, 1);
+    });
+
+    testWidgets('fuera del umbral de cacheo por distancia, resuelve una '
+        'dirección nueva', (tester) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository();
+
+      // Segundo punto a ~1.1km del primero (0.01° de latitud) — muy
+      // por encima de los 50m del umbral.
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+        locationSequence: [
+          _buildPosition(-6.4877, -76.3599),
+          _buildPosition(-6.4977, -76.3599),
+        ],
+      );
+
+      expect(fareRepository.originAddressCallCount, 1);
+
+      await _tapCenterOnMyLocation(tester);
+
+      expect(fareRepository.originAddressCallCount, 2);
+      expect(fareRepository.requestedOriginCoordinates[1], [-6.4977, -76.3599]);
+    });
+
+    testWidgets('varios taps rápidos sin moverse producen una sola llamada al '
+        'repositorio, no una por tap', (tester) async {
+      final fareRepository = _FakeFareRepository(
+        estimatedFare: '7.00',
+        originAddress: 'Calle Rioja 495, Tarapoto',
+        holdOriginAddressRequests: true,
+      );
+      final rideRepository = _FakeRideRepository();
+
+      // Sin `locationSequence`: siempre el mismo punto fijo — el
+      // Passenger no se movió entre taps.
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+      );
+
+      // La primera llamada real ya se disparó y quedó "en vuelo"
+      // a propósito (holdOriginAddressRequests) — el Passenger
+      // todavía no ve la dirección resuelta.
+      expect(fareRepository.originAddressCallCount, 1);
+
+      // Varios taps rápidos de "centrar en mi ubicación" mientras
+      // esa primera llamada sigue sin responder. Cada tap completa
+      // su propio ciclo de GPS/cámara (no depende de
+      // origin-address), pero ninguno debe disparar una segunda
+      // llamada al backend para prácticamente el mismo punto — este
+      // es el bug reportado (taps repetidos acumulando llamadas).
+      await _tapCenterOnMyLocation(tester);
+      await _tapCenterOnMyLocation(tester);
+      await _tapCenterOnMyLocation(tester);
+
+      expect(fareRepository.originAddressCallCount, 1);
+
+      // Al responder la única llamada real, se refleja con
+      // normalidad.
+      fareRepository.resolveOriginAddressCall(0);
+      await _flushAsync(tester);
+
+      // HOME-LAYOUT-R1: la tarjeta de la hoja muestra el texto
+      // completo; el marcador muestra la versión corta (ver el grupo
+      // de tests dedicado más abajo).
+      expect(find.text('Calle Rioja 495, Tarapoto'), findsOneWidget);
+
+      // Un tap posterior, ya con la dirección resuelta y sin
+      // movimiento, tampoco dispara una llamada nueva.
+      await _tapCenterOnMyLocation(tester);
+
+      expect(fareRepository.originAddressCallCount, 1);
+    });
+  });
+
+  group('HOME-LAYOUT-R1 — etiqueta corta del marcador propio', () {
     testWidgets(
-      'si falla la resolución, no rompe la pantalla y conserva el '
-      'placeholder existente',
+      'con coma en la dirección, el marcador muestra solo la parte antes '
+      'de la primera coma; la tarjeta de la hoja conserva la dirección '
+      'completa',
       (tester) async {
         final fareRepository = _FakeFareRepository(
           estimatedFare: '7.00',
-          failOriginAddress: true,
+          originAddress: 'Calle Rioja 495, Tarapoto 22202, Perú',
         );
         final rideRepository = _FakeRideRepository();
 
@@ -793,21 +1010,21 @@ void main() {
           rideRepository: rideRepository,
         );
 
-        expect(fareRepository.originAddressCallCount, 1);
-        expect(find.text('Tu ubicación actual'), findsOneWidget);
-
-        // La pantalla sigue funcional: el CTA de destino sigue ahí.
-        expect(find.text('Selecciona un destino'), findsNWidgets(2));
+        expect(find.text('Calle Rioja 495'), findsOneWidget);
+        expect(
+          find.text('Calle Rioja 495, Tarapoto 22202, Perú'),
+          findsOneWidget,
+        );
       },
     );
 
     testWidgets(
-      'la dirección real de la cotización siempre gana sobre la '
-      'resuelta preemptivamente',
+      'sin coma en la dirección, el marcador muestra el texto completo tal '
+      'cual — nada que recortar',
       (tester) async {
         final fareRepository = _FakeFareRepository(
           estimatedFare: '7.00',
-          originAddress: 'Preemptiva: Jr. Lima 250',
+          originAddress: 'Terminal Terrestre',
         );
         final rideRepository = _FakeRideRepository();
 
@@ -817,151 +1034,53 @@ void main() {
           rideRepository: rideRepository,
         );
 
-        expect(
-          find.text('Preemptiva: Jr. Lima 250'),
-          findsOneWidget,
+        // Aparece completo en ambos lugares: no hay coma que recortar,
+        // así que la etiqueta corta y la dirección completa coinciden.
+        expect(find.text('Terminal Terrestre'), findsNWidgets(2));
+      },
+    );
+
+    testWidgets(
+      'al elegir destino oculta la etiqueta del origen y conserva el origen '
+      'en la tarjeta de la hoja',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
         );
+
+        expect(find.text('Calle Rioja 495'), findsOneWidget);
+        expect(find.text('Calle Rioja 495, Tarapoto'), findsOneWidget);
 
         await _selectDestinationOnMap(tester);
 
-        // La cotización real (fake fija su propio originAddress) pisa
-        // la dirección preemptiva, sin ambigüedad de prioridad.
-        expect(find.text('Preemptiva: Jr. Lima 250'), findsNothing);
-        expect(fareRepository.callCount, 1);
-      },
-    );
-
-    testWidgets(
-      'dentro del umbral de cacheo por distancia, no vuelve a llamar '
-      'al backend',
-      (tester) async {
-        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-        final rideRepository = _FakeRideRepository();
-
-        // Segundo punto a ~5m del primero — muy por debajo de los 50m
-        // del umbral (~0.00005° de latitud ya son unos 5.5m en esta
-        // latitud).
-        await _pumpHomeScreen(
-          tester,
-          fareRepository: fareRepository,
-          rideRepository: rideRepository,
-          locationSequence: [
-            _buildPosition(-6.4877, -76.3599),
-            _buildPosition(-6.48775, -76.3599),
-          ],
-        );
-
-        expect(fareRepository.originAddressCallCount, 1);
-
-        await _tapCenterOnMyLocation(tester);
-
-        expect(fareRepository.originAddressCallCount, 1);
-      },
-    );
-
-    testWidgets(
-      'fuera del umbral de cacheo por distancia, resuelve una '
-      'dirección nueva',
-      (tester) async {
-        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-        final rideRepository = _FakeRideRepository();
-
-        // Segundo punto a ~1.1km del primero (0.01° de latitud) — muy
-        // por encima de los 50m del umbral.
-        await _pumpHomeScreen(
-          tester,
-          fareRepository: fareRepository,
-          rideRepository: rideRepository,
-          locationSequence: [
-            _buildPosition(-6.4877, -76.3599),
-            _buildPosition(-6.4977, -76.3599),
-          ],
-        );
-
-        expect(fareRepository.originAddressCallCount, 1);
-
-        await _tapCenterOnMyLocation(tester);
-
-        expect(fareRepository.originAddressCallCount, 2);
-        expect(
-          fareRepository.requestedOriginCoordinates[1],
-          [-6.4977, -76.3599],
-        );
-      },
-    );
-
-    testWidgets(
-      'varios taps rápidos sin moverse producen una sola llamada al '
-      'repositorio, no una por tap',
-      (tester) async {
-        final fareRepository = _FakeFareRepository(
-          estimatedFare: '7.00',
-          originAddress: 'Calle Rioja 495, Tarapoto',
-          holdOriginAddressRequests: true,
-        );
-        final rideRepository = _FakeRideRepository();
-
-        // Sin `locationSequence`: siempre el mismo punto fijo — el
-        // Passenger no se movió entre taps.
-        await _pumpHomeScreen(
-          tester,
-          fareRepository: fareRepository,
-          rideRepository: rideRepository,
-        );
-
-        // La primera llamada real ya se disparó y quedó "en vuelo"
-        // a propósito (holdOriginAddressRequests) — el Passenger
-        // todavía no ve la dirección resuelta.
-        expect(fareRepository.originAddressCallCount, 1);
-
-        // Varios taps rápidos de "centrar en mi ubicación" mientras
-        // esa primera llamada sigue sin responder. Cada tap completa
-        // su propio ciclo de GPS/cámara (no depende de
-        // origin-address), pero ninguno debe disparar una segunda
-        // llamada al backend para prácticamente el mismo punto — este
-        // es el bug reportado (taps repetidos acumulando llamadas).
-        await _tapCenterOnMyLocation(tester);
-        await _tapCenterOnMyLocation(tester);
-        await _tapCenterOnMyLocation(tester);
-
-        expect(fareRepository.originAddressCallCount, 1);
-
-        // Al responder la única llamada real, se refleja con
-        // normalidad.
-        fareRepository.resolveOriginAddressCall(0);
-        await _flushAsync(tester);
-
-        expect(
-          find.text('Calle Rioja 495, Tarapoto'),
-          findsOneWidget,
-        );
-
-        // Un tap posterior, ya con la dirección resuelta y sin
-        // movimiento, tampoco dispara una llamada nueva.
-        await _tapCenterOnMyLocation(tester);
-
-        expect(fareRepository.originAddressCallCount, 1);
+        expect(find.text('Calle Rioja 495'), findsNothing);
+        expect(find.text('Tu ubicación actual'), findsOneWidget);
+        expect(find.text('Destino seleccionado en el mapa'), findsWidgets);
       },
     );
   });
 
   group('SUGGESTED-DESTINATIONS-R1', () {
-    testWidgets(
-      'sin historial, no se muestra ninguna sugerencia',
-      (tester) async {
-        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-        final rideRepository = _FakeRideRepository();
+    testWidgets('sin historial, no se muestra ninguna sugerencia', (
+      tester,
+    ) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository();
 
-        await _pumpHomeScreen(
-          tester,
-          fareRepository: fareRepository,
-          rideRepository: rideRepository,
-        );
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+      );
 
-        expect(rideRepository.getHistoryCallCount, 1);
-        expect(find.byIcon(Icons.history), findsNothing);
-      },
-    );
+      expect(rideRepository.getHistoryCallCount, 1);
+      expect(find.byIcon(Icons.history), findsNothing);
+    });
 
     testWidgets(
       'con historial, muestra hasta suggestedDestinationsCount sugerencias, '
@@ -1019,108 +1138,101 @@ void main() {
       },
     );
 
-    testWidgets(
-      'toca una sugerencia: fija destino y dispara la cotización sin '
-      'autocomplete ni details',
-      (tester) async {
-        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-        final rideRepository = _FakeRideRepository(
-          history: [
-            _historyItem(
-              rideId: 'r1',
-              destinationAddress: 'UPEU',
-              destinationLatitude: -6.5123,
-              destinationLongitude: -76.3712,
-              requestedAt: DateTime(2026, 8, 24),
-            ),
-          ],
-        );
+    testWidgets('toca una sugerencia: fija destino y dispara la cotización sin '
+        'autocomplete ni details', (tester) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository(
+        history: [
+          _historyItem(
+            rideId: 'r1',
+            destinationAddress: 'UPEU',
+            destinationLatitude: -6.5123,
+            destinationLongitude: -76.3712,
+            requestedAt: DateTime(2026, 8, 24),
+          ),
+        ],
+      );
 
-        await _pumpHomeScreen(
-          tester,
-          fareRepository: fareRepository,
-          rideRepository: rideRepository,
-        );
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+      );
 
-        expect(fareRepository.callCount, 0);
+      expect(fareRepository.callCount, 0);
 
-        await tester.tap(find.text('UPEU'));
-        await _flushAsync(tester);
+      await tester.tap(find.text('UPEU'));
+      await _flushAsync(tester);
 
-        expect(fareRepository.callCount, 1);
-        expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
-      },
-    );
+      expect(fareRepository.callCount, 1);
+      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+    });
 
-    testWidgets(
-      'la sugerencia queda deshabilitada mientras no hay GPS',
-      (tester) async {
-        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-        final rideRepository = _FakeRideRepository(
-          history: [
-            _historyItem(
-              rideId: 'r1',
-              destinationAddress: 'UPEU',
-              requestedAt: DateTime(2026, 8, 24),
-            ),
-          ],
-        );
-        final geolocator = _FakeGeolocatorPlatform(hold: true);
+    testWidgets('la sugerencia queda deshabilitada mientras no hay GPS', (
+      tester,
+    ) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository(
+        history: [
+          _historyItem(
+            rideId: 'r1',
+            destinationAddress: 'UPEU',
+            requestedAt: DateTime(2026, 8, 24),
+          ),
+        ],
+      );
+      final geolocator = _FakeGeolocatorPlatform(hold: true);
 
-        await _pumpHomeScreen(
-          tester,
-          fareRepository: fareRepository,
-          rideRepository: rideRepository,
-          geolocatorPlatform: geolocator,
-        );
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+        geolocatorPlatform: geolocator,
+      );
 
-        // Sin GPS todavía: la sugerencia ya cargó (no depende del
-        // GPS), pero tocarla no debe hacer nada.
-        expect(find.text('UPEU'), findsOneWidget);
+      // Sin GPS todavía: la sugerencia ya cargó (no depende del
+      // GPS), pero tocarla no debe hacer nada.
+      expect(find.text('UPEU'), findsOneWidget);
 
-        await tester.tap(find.text('UPEU'));
-        await _flushAsync(tester);
+      await tester.tap(find.text('UPEU'));
+      await _flushAsync(tester);
 
-        expect(fareRepository.callCount, 0);
+      expect(fareRepository.callCount, 0);
 
-        geolocator.releaseHold();
-        await _flushAsync(tester);
+      geolocator.releaseHold();
+      await _flushAsync(tester);
 
-        await tester.tap(find.text('UPEU'));
-        await _flushAsync(tester);
+      await tester.tap(find.text('UPEU'));
+      await _flushAsync(tester);
 
-        expect(fareRepository.callCount, 1);
-      },
-    );
+      expect(fareRepository.callCount, 1);
+    });
 
-    testWidgets(
-      'una vez elegido un destino, deja de mostrarse la sección de '
-      'sugerencias',
-      (tester) async {
-        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-        final rideRepository = _FakeRideRepository(
-          history: [
-            _historyItem(
-              rideId: 'r1',
-              destinationAddress: 'UPEU',
-              requestedAt: DateTime(2026, 8, 24),
-            ),
-          ],
-        );
+    testWidgets('una vez elegido un destino, deja de mostrarse la sección de '
+        'sugerencias', (tester) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository(
+        history: [
+          _historyItem(
+            rideId: 'r1',
+            destinationAddress: 'UPEU',
+            requestedAt: DateTime(2026, 8, 24),
+          ),
+        ],
+      );
 
-        await _pumpHomeScreen(
-          tester,
-          fareRepository: fareRepository,
-          rideRepository: rideRepository,
-        );
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+      );
 
-        expect(find.text('UPEU'), findsOneWidget);
+      expect(find.text('UPEU'), findsOneWidget);
 
-        await _selectDestinationOnMap(tester);
+      await _selectDestinationOnMap(tester);
 
-        expect(find.byIcon(Icons.history), findsNothing);
-      },
-    );
+      expect(find.byIcon(Icons.history), findsNothing);
+    });
   });
 }
 
@@ -1181,12 +1293,11 @@ Future<void> _pumpHomeScreen(
   PlacesRepository? placesRepository,
   List<Position>? locationSequence,
   _FakeGeolocatorPlatform? geolocatorPlatform,
+  MediaQueryData? mediaQueryData,
 }) async {
   GeolocatorPlatform.instance =
       geolocatorPlatform ??
-      _FakeGeolocatorPlatform(
-        positions: locationSequence,
-      );
+      _FakeGeolocatorPlatform(positions: locationSequence);
 
   await tester.pumpWidget(
     ProviderScope(
@@ -1196,7 +1307,11 @@ Future<void> _pumpHomeScreen(
         if (placesRepository != null)
           placesRepositoryProvider.overrideWithValue(placesRepository),
       ],
-      child: const MaterialApp(home: HomeScreen()),
+      child: MaterialApp(
+        home: mediaQueryData == null
+            ? const HomeScreen()
+            : MediaQuery(data: mediaQueryData, child: const HomeScreen()),
+      ),
     ),
   );
 
