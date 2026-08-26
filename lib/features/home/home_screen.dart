@@ -2560,136 +2560,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
         const SizedBox(height: 20),
 
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: PassengerColors.crema,
-            borderRadius: BorderRadius.circular(17),
-            border: Border.all(color: PassengerColors.bordeSuave),
-          ),
-          child: Column(
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 20,
-                    height: 20,
-                    decoration: const BoxDecoration(
-                      color: PassengerColors.acento,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.my_location,
-                      color: PassengerColors.blanco,
-                      size: 12,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Origen',
-                          style: TextStyle(
-                            color: PassengerColors.textoSecundario,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          _originAddressLabel(quote, position),
-                          style: const TextStyle(
-                            color: PassengerColors.textoPrimario,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.only(left: 9),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Column(
-                    children: List.generate(
-                      3,
-                      (_) => Container(
-                        width: 2,
-                        height: 4,
-                        margin: const EdgeInsets.symmetric(vertical: 2),
-                        color: PassengerColors.bordeSuave,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.location_on,
-                    color: PassengerColors.destino,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Destino',
-                          style: TextStyle(
-                            color: PassengerColors.textoSecundario,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          destination == null
-                              ? 'Selecciona un destino'
-                              : _selectedDestinationName ??
-                                    'Destino seleccionado',
-                          style: const TextStyle(
-                            color: PassengerColors.textoPrimario,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        if (destination != null &&
-                            _selectedDestinationAddress != null &&
-                            _selectedDestinationAddress!.trim().isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            _selectedDestinationAddress!,
-                            style: const TextStyle(
-                              color: PassengerColors.textoSecundario,
-                              fontSize: 12.5,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (destination != null)
-                    IconButton(
-                      tooltip: 'Quitar destino',
-                      onPressed: _clearDestination,
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(
-                        Icons.close,
-                        color: PassengerColors.textoSecundario,
-                        size: 20,
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
+        _buildOriginDestinationCard(
+          position: position,
+          destination: destination,
+          quote: quote,
         ),
 
         if (quote != null) ...[
@@ -2833,6 +2707,150 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
         const SizedBox(height: 24),
       ],
+    );
+  }
+
+  /// Tarjeta origen/destino. Extraída de `_buildSheetContent` en
+  /// `HOME-FLOW-R1` (etapa 1, puro refactor, cero cambio de
+  /// comportamiento) — es el paso previo necesario para poder
+  /// reposicionarla flotando sobre el mapa en la etapa 4, cuando exista
+  /// un destino elegido. Por ahora sigue llamada desde el mismo lugar
+  /// de siempre dentro de la hoja; la única diferencia es que ahora
+  /// vive en su propio método en vez de estar inline.
+  Widget _buildOriginDestinationCard({
+    required Position? position,
+    required LatLng? destination,
+    required FareEstimate? quote,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: PassengerColors.crema,
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: PassengerColors.bordeSuave),
+      ),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                decoration: const BoxDecoration(
+                  color: PassengerColors.acento,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.my_location,
+                  color: PassengerColors.blanco,
+                  size: 12,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Origen',
+                      style: TextStyle(
+                        color: PassengerColors.textoSecundario,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _originAddressLabel(quote, position),
+                      style: const TextStyle(
+                        color: PassengerColors.textoPrimario,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 9),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Column(
+                children: List.generate(
+                  3,
+                  (_) => Container(
+                    width: 2,
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    color: PassengerColors.bordeSuave,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.location_on,
+                color: PassengerColors.destino,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Destino',
+                      style: TextStyle(
+                        color: PassengerColors.textoSecundario,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      destination == null
+                          ? 'Selecciona un destino'
+                          : _selectedDestinationName ?? 'Destino seleccionado',
+                      style: const TextStyle(
+                        color: PassengerColors.textoPrimario,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (destination != null &&
+                        _selectedDestinationAddress != null &&
+                        _selectedDestinationAddress!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        _selectedDestinationAddress!,
+                        style: const TextStyle(
+                          color: PassengerColors.textoSecundario,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (destination != null)
+                IconButton(
+                  tooltip: 'Quitar destino',
+                  onPressed: _clearDestination,
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(
+                    Icons.close,
+                    color: PassengerColors.textoSecundario,
+                    size: 20,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
