@@ -119,4 +119,28 @@ class PassengerTypography {
     fontSize: 13,
     fontWeight: FontWeight.w400,
   );
+
+  /// Valor del monto en el campo "¿Cuánto quieres ofrecer?" de Home.
+  /// Agregado en `DESIGN-SYSTEM-R2` (2026-08-26), tomado literalmente
+  /// del tamaño/peso ya usado en `home_screen.dart`. No hay escala de
+  /// este tamaño en la sección 3 — es la única cifra grande de toda la
+  /// app (un monto en soles que el pasajero edita directamente).
+  ///
+  /// **Provisional**: el campo de precio se rediseña por completo en
+  /// el checkpoint de tarifa sugerida (ver `errores-conocidos.md`,
+  /// "Campo de precio acepta texto libre"). Esta escala puede cambiar
+  /// o desaparecer cuando eso ocurra — no darla por definitiva.
+  static const TextStyle montoOferta = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 27,
+    fontWeight: FontWeight.w800,
+  );
+
+  /// Prefijo "S/ " junto a [montoOferta], mismo campo. Mismo carácter
+  /// provisional que [montoOferta] — ver esa nota.
+  static const TextStyle prefijoMoneda = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 19,
+    fontWeight: FontWeight.w700,
+  );
 }

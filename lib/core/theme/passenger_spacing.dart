@@ -55,6 +55,18 @@
 ///   texto (`gap: 9px`).
 /// - [tamanoIconoNotaPie]: tamaño del ícono de candado (`font-size:
 ///   17px` del ícono en el mockup).
+///
+/// Dos radios agregados en `DESIGN-SYSTEM-R2` (2026-08-26), a partir
+/// de la auditoría de `home_screen.dart`: el sistema solo definía
+/// [radioCampoBoton] (14) y [radioHojaCrema] (26) porque se diseñó
+/// sobre pantallas sin mapa ni chips. Documentados también en
+/// `sistema-de-diseno.md` sección 4.
+/// - [radioPildora]: radio de los chips/píldoras tocables (chip de
+///   métricas sobre el mapa, chip de destino sugerido). Forma
+///   completamente redondeada, no la comparten campos ni botones.
+/// - [radioEtiquetaMarcador]: radio de la etiqueta que acompaña al
+///   marcador de origen en el mapa — más chica y menos redondeada que
+///   una píldora, propia de ese único elemento.
 class PassengerSpacing {
   const PassengerSpacing._();
 
@@ -79,6 +91,8 @@ class PassengerSpacing {
   static const double espacioAntesNotaPie = 20;
   static const double espacioIconoNotaPie = 9;
   static const double tamanoIconoNotaPie = 17;
+  static const double radioPildora = 30;
+  static const double radioEtiquetaMarcador = 11;
 
   /// Ningún elemento tocable mide menos de esto de lado.
   static const double tamanoTocableMinimo = 44;
