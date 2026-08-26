@@ -36,17 +36,17 @@ import 'package:flutter/material.dart';
 ///   [alerta] pero es más oscuro/ocre que ambos — visualmente distinto
 ///   de los dos a simple vista, no solo en el valor hex.
 ///
-///   **PROVISIONAL (aprobado como tal por JuanJo, 2026-08-26).** No se
-///   pudo validar en pantalla en este checkpoint porque `DESIGN-SYSTEM-R2`
-///   solo agrega tokens, no los usa en ninguna vista todavía. Se
-///   valida recién cuando se aplique en la migración de
-///   `home_screen.dart` — prestar atención especial al caso de
-///   "cotización vencida", que se pinta sobre `verdeMarca` (verde
-///   oscuro), no sobre `crema`: un ocre oscuro como este sobre un
-///   fondo oscuro puede quedar con poco contraste, a diferencia del
-///   uso sobre `fondoAviso`/`crema` (claro), donde el contraste es más
-///   fácil de lograr. Si falla ese caso, el valor se corrige en este
-///   único lugar — nada más referencia el hex directamente.
+///   **Validado por cálculo de contraste (`HOME-DESIGN-R1`, 2026-08-26),
+///   solo para uso sobre fondos claros.** Contra [crema]/[fondoAviso]
+///   da 4.10:1 (pasa el mínimo de 3:1 para íconos). Contra `verdeMarca`
+///   daba 2.90:1 — no pasaba ni el mínimo de ícono (3:1) ni el de texto
+///   (4.5:1). En vez de buscar un segundo valor para fondo oscuro, se
+///   quitó el único uso de [aviso] que caía sobre `verdeMarca`
+///   ("cotización vencida" en `home_screen.dart`, ver
+///   `App-passenger/decisiones.md`): el ícono que lo acompañaba se
+///   eliminó por decorativo y el texto pasó a
+///   [textoSecundarioSobreOscuro]. [aviso] queda con un solo uso, sobre
+///   [crema], y no necesita partirse en dos tokens.
 /// - [textoTenueSobreOscuro] / [textoSecundarioSobreOscuro]: el
 ///   sistema se definió sobre login/registro/completar perfil, todas
 ///   pantallas claras — nunca cubrió texto sobre una superficie

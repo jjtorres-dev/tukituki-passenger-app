@@ -1727,7 +1727,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildMetricChip({required IconData icon, required String label}) {
+  /// Sin ícono a propósito (`HOME-DESIGN-R1`, análisis de contraste,
+  /// 2026-08-26): el ícono decorativo que tenía antes usaba `acento`
+  /// sobre `verdeMarca`/el overlay translúcido del chip — 2.33:1 (peor
+  /// aún, 1.61:1 contra el fondo compuesto real), por debajo del
+  /// mínimo de 3:1 para elementos gráficos. El texto ya dice todo lo
+  /// que el ícono aportaba (distancia/duración), así que se quita en
+  /// vez de recolorearlo.
+  Widget _buildMetricChip({required String label}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -1735,19 +1742,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         borderRadius: BorderRadius.circular(30),
         border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 17, color: PassengerColors.acento),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: PassengerColors.blanco,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: PassengerColors.blanco,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -2228,10 +2228,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
               const SizedBox(width: 10),
+              // HOME-DESIGN-R1: blanco, no acento (2.33:1 sobre
+              // verdeMarca, no pasaba el mínimo de 3:1) — no es
+              // decorativo, es el afordance de que la etiqueta se
+              // puede tocar para ajustar el punto de recogida.
               const Icon(
                 Icons.chevron_right,
                 size: 15,
-                color: PassengerColors.acento,
+                color: PassengerColors.blanco,
               ),
             ],
           ),
@@ -2783,12 +2787,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     runSpacing: 8,
                     children: [
                       _buildMetricChip(
-                        icon: Icons.route_outlined,
                         label:
                             '${(quote.distanceMeters / 1000).toStringAsFixed(1)} km',
                       ),
                       _buildMetricChip(
-                        icon: Icons.schedule,
                         label: '${(quote.durationSeconds / 60).round()} min',
                       ),
                     ],
@@ -2796,19 +2798,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
                   const SizedBox(height: 20),
 
+                  // HOME-DESIGN-R1: sin ícono de reloj (análisis de
+                  // contraste, 2026-08-26) — el texto ya dice
+                  // "vigente"/"vencida" sin ambigüedad, y el ícono
+                  // usaba `aviso` sobre `verdeMarca` (2.90:1, no
+                  // pasaba ni el mínimo de 3:1 de ícono ni el 4.5:1 de
+                  // texto). El texto de "vencida" pasa a
+                  // `textoSecundarioSobreOscuro` por la misma razón —
+                  // `aviso` deja de usarse sobre fondo oscuro.
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        quoteExpired
-                            ? Icons.timer_off_outlined
-                            : Icons.schedule,
-                        size: 16,
-                        color: quoteExpired
-                            ? PassengerColors.aviso
-                            : PassengerColors.textoSecundarioSobreOscuro,
-                      ),
-                      const SizedBox(width: 7),
                       Flexible(
                         child: Text(
                           quoteExpired
@@ -2816,10 +2816,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               : 'Cotización válida hasta '
                                     '${_formatQuoteExpiry(quote.expiresAt)}',
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: quoteExpired
-                                ? PassengerColors.aviso
-                                : PassengerColors.textoSecundarioSobreOscuro,
+                          style: const TextStyle(
+                            color: PassengerColors.textoSecundarioSobreOscuro,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
