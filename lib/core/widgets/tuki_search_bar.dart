@@ -41,6 +41,17 @@ import '../theme/passenger_typography.dart';
 ///   [PassengerColors.bordeSuave], mismo criterio que el resto de la
 ///   migración de `home_screen.dart` para bordes secundarios — sujeto
 ///   a confirmación visual cuando se conecte a la pantalla real.
+///
+/// [onTap] agregado en `HOME-FLOW-R1` (etapa 3, 2026-08-26): Home
+/// vacío usa esta barra como disparador de navegación (toca → abre
+/// `SearchDestinationScreen`), no como campo editable. Con [onTap] no
+/// nulo, toda la barra (ícono, texto, relleno) queda envuelta en un
+/// `GestureDetector` opaco y el `TextField` interno deja de recibir
+/// toques propios (`IgnorePointer`) — nunca gana foco ni abre teclado,
+/// el toque siempre lo resuelve [onTap]. [readOnly] complementa esto a
+/// nivel del propio `TextField` (sin cursor de edición) para que el
+/// comportamiento sea consistente si en algún momento se usa [onTap]
+/// sin depender únicamente del `IgnorePointer`.
 class TukiSearchBar extends StatefulWidget {
   const TukiSearchBar({
     super.key,
@@ -51,6 +62,8 @@ class TukiSearchBar extends StatefulWidget {
     this.isLoading = false,
     this.onClear,
     this.onChanged,
+    this.onTap,
+    this.readOnly = false,
     this.textInputAction,
     this.autocorrect = true,
   });
@@ -70,6 +83,14 @@ class TukiSearchBar extends StatefulWidget {
   final VoidCallback? onClear;
 
   final ValueChanged<String>? onChanged;
+
+  /// Si no es `null`, la barra completa se comporta como un disparador
+  /// de navegación en vez de un campo editable — ver nota de clase.
+  final VoidCallback? onTap;
+
+  /// Ver [onTap].
+  final bool readOnly;
+
   final TextInputAction? textInputAction;
   final bool autocorrect;
 
@@ -155,7 +176,7 @@ class _TukiSearchBarState extends State<TukiSearchBar> {
     final showClear =
         !widget.isLoading && widget.onClear != null && _hasText;
 
-    return Container(
+    final content = Container(
       decoration: BoxDecoration(
         color: PassengerColors.crema,
         borderRadius: BorderRadius.circular(PassengerSpacing.radioCampoBoton),
@@ -175,6 +196,7 @@ class _TukiSearchBarState extends State<TukiSearchBar> {
                 controller: widget.controller,
                 focusNode: _focusNode,
                 enabled: widget.enabled,
+                readOnly: widget.readOnly,
                 textInputAction: widget.textInputAction,
                 autocorrect: widget.autocorrect,
                 onChanged: widget.onChanged,
@@ -211,6 +233,16 @@ class _TukiSearchBarState extends State<TukiSearchBar> {
           ],
         ),
       ),
+    );
+
+    if (widget.onTap == null) {
+      return content;
+    }
+
+    return GestureDetector(
+      onTap: widget.enabled ? widget.onTap : null,
+      behavior: HitTestBehavior.opaque,
+      child: IgnorePointer(child: content),
     );
   }
 }

@@ -147,4 +147,64 @@ void main() {
       expect(focusedSide.width, 1.5);
     },
   );
+
+  testWidgets(
+    'con onTap, tocar cualquier parte de la barra lo invoca y el campo '
+    'interno nunca gana foco',
+    (tester) async {
+      final controller = TextEditingController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      var tapped = 0;
+
+      await tester.pumpWidget(
+        wrap(
+          TukiSearchBar(
+            controller: controller,
+            focusNode: focusNode,
+            readOnly: true,
+            hintText: 'Buscar destino',
+            onTap: () => tapped++,
+          ),
+        ),
+      );
+
+      // `warnIfMissed: false`: el punto deliberadamente NO hace hit
+      // test contra el ícono/texto interno -- `IgnorePointer` los deja
+      // fuera del árbol de gestos a propósito, todo el toque lo
+      // resuelve el `GestureDetector` externo. Es justo lo que este
+      // test quiere confirmar, no un error.
+      await tester.tap(find.byIcon(Icons.search), warnIfMissed: false);
+      await tester.pump();
+      expect(tapped, 1);
+
+      await tester.tap(find.text('Buscar destino'), warnIfMissed: false);
+      await tester.pump();
+      expect(tapped, 2);
+      expect(focusNode.hasFocus, isFalse);
+    },
+  );
+
+  testWidgets('con onTap, enabled: false no dispara el callback', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    var tapped = 0;
+
+    await tester.pumpWidget(
+      wrap(
+        TukiSearchBar(
+          controller: controller,
+          readOnly: true,
+          enabled: false,
+          onTap: () => tapped++,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(TukiSearchBar));
+    await tester.pump();
+
+    expect(tapped, 0);
+  });
 }

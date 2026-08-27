@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:passenger/core/theme/passenger_colors.dart';
+import 'package:passenger/core/widgets/tuki_search_bar.dart';
 import 'package:passenger/features/fare/data/fare_repository.dart';
 import 'package:passenger/features/fare/domain/fare_estimate.dart';
 import 'package:passenger/features/home/home_screen.dart';
@@ -30,58 +31,64 @@ void main() {
     GeolocatorPlatform.instance = originalGeolocatorPlatform;
   });
 
-  testWidgets('G4B-R5-1: sin destino, "Selecciona un destino" sigue '
-      'funcionando como antes', (tester) async {
-    final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-    final rideRepository = _FakeRideRepository();
+  testWidgets(
+    'HOME-FLOW-R1: sin destino, hoja mínima sin CTA — "Selecciona un '
+    'destino" ya no existe, el disparador de búsqueda lo reemplaza',
+    (tester) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository();
 
-    await _pumpHomeScreen(
-      tester,
-      fareRepository: fareRepository,
-      rideRepository: rideRepository,
-      mediaQueryData: const MediaQueryData(
-        viewPadding: EdgeInsets.only(top: 24),
-      ),
-    );
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+        mediaQueryData: const MediaQueryData(
+          viewPadding: EdgeInsets.only(top: 24),
+        ),
+      );
 
-    final statusBarBackground = tester.widget<SizedBox>(
-      find.byKey(const ValueKey('home-status-bar-background')),
-    );
-    expect(statusBarBackground.height, 24);
-    expect(
-      tester
-          .getSize(find.byKey(const ValueKey('home-status-bar-background')))
-          .width,
-      tester.getSize(find.byType(Scaffold)).width,
-    );
-    expect(
-      (statusBarBackground.child! as ColoredBox).color,
-      PassengerColors.verdeMarca,
-    );
-    expect(tester.getTopLeft(find.byType(GoogleMap)).dy, 24);
-    expect(tester.getTopLeft(find.byTooltip('Cerrar sesión')).dy, 38);
+      final statusBarBackground = tester.widget<SizedBox>(
+        find.byKey(const ValueKey('home-status-bar-background')),
+      );
+      expect(statusBarBackground.height, 24);
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('home-status-bar-background')))
+            .width,
+        tester.getSize(find.byType(Scaffold)).width,
+      );
+      expect(
+        (statusBarBackground.child! as ColoredBox).color,
+        PassengerColors.verdeMarca,
+      );
+      expect(tester.getTopLeft(find.byType(GoogleMap)).dy, 24);
+      expect(tester.getTopLeft(find.byTooltip('Cerrar sesión')).dy, 38);
 
-    final systemUiRegion = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
-      find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
-    );
-    expect(systemUiRegion.value.statusBarIconBrightness, Brightness.light);
+      final systemUiRegion = tester
+          .widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+            find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+          );
+      expect(systemUiRegion.value.statusBarIconBrightness, Brightness.light);
 
-    // Aparece dos veces por diseño: la tarjeta de destino y el CTA.
-    expect(find.text('Selecciona un destino'), findsNWidgets(2));
+      // HOME-FLOW-R1: ni la tarjeta origen/destino ni el CTA existen
+      // en Home vacío -- el texto "Selecciona un destino" no aparece
+      // en ningún lado.
+      expect(find.text('Selecciona un destino'), findsNothing);
+      expect(find.byType(FilledButton), findsNothing);
 
-    final button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNull);
-    expect(
-      find.descendant(
-        of: find.byType(FilledButton),
-        matching: find.text('Selecciona un destino'),
-      ),
-      findsOneWidget,
-    );
+      expect(find.text('¿A dónde vamos?'), findsOneWidget);
 
-    // Sin destino, jamás se dispara una cotización.
-    expect(fareRepository.callCount, 0);
-  });
+      // El disparador de búsqueda está presente y habilitado (ya hay
+      // GPS en este fake).
+      final trigger = tester.widget<TukiSearchBar>(
+        find.byKey(const ValueKey('home-search-trigger')),
+      );
+      expect(trigger.enabled, isTrue);
+
+      // Sin destino, jamás se dispara una cotización.
+      expect(fareRepository.callCount, 0);
+    },
+  );
 
   testWidgets(
     'G4B-R5-2: tras seleccionar destino, "Calcular tarifa" ya NO aparece',
@@ -582,11 +589,14 @@ void main() {
       expect(fareRepository.callCount, 1);
       expect(fareRepository.requestedIsManualSelection[0], isTrue);
 
-      // No hace falta limpiar el destino manual antes de este paso:
-      // `_selectDestinationViaAutocomplete` ubica el buscador por su
-      // Key propia (`destination-search-field`), así que sigue siendo
-      // inequívoco aunque la cotización del paso anterior haya
-      // agregado su propio campo de texto ("¿Cuánto quieres ofrecer?").
+      // HOME-FLOW-R1: a diferencia del campo inline anterior (que
+      // permitía escribir encima de un destino ya elegido y lo
+      // reemplazaba solo), el disparador de búsqueda ya no existe en
+      // Home con destino -- primero hay que volver a Home vacío
+      // tocando "Quitar destino" en la tarjeta.
+      await tester.tap(find.byTooltip('Quitar destino'));
+      await _flushAsync(tester);
+
       await _selectDestinationViaAutocomplete(
         tester,
         query: 'Municipalidad',
@@ -828,11 +838,12 @@ void main() {
           -76.3599,
         ]);
 
-        // HOME-LAYOUT-R1: la tarjeta origen/destino de la hoja sigue
-        // mostrando la dirección completa. La etiqueta del marcador
-        // flotante muestra la versión corta (`_shortAddressLabel`,
-        // recorte por coma) — ver el grupo de tests dedicado más abajo.
-        expect(find.text('Calle Rioja 495, Tarapoto'), findsOneWidget);
+        // HOME-FLOW-R1: sin destino, la tarjeta origen/destino ya no
+        // vive en la hoja (se muda arriba recién en la etapa 4) — solo
+        // queda la etiqueta del marcador flotante, en su versión corta
+        // (`_shortAddressLabel`, recorte por coma).
+        expect(find.text('Calle Rioja 495'), findsOneWidget);
+        expect(find.text('Calle Rioja 495, Tarapoto'), findsNothing);
         expect(find.text('Tu ubicación actual'), findsNothing);
 
         // Sin destino, jamás se dispara una cotización — la dirección
@@ -856,12 +867,16 @@ void main() {
       );
 
       expect(fareRepository.originAddressCallCount, 1);
-      // HOME-LAYOUT-R1: aparece en la etiqueta del marcador y en la
-      // tarjeta origen/destino de la hoja.
-      expect(find.text('Tu ubicación actual'), findsNWidgets(2));
+      // HOME-FLOW-R1: sin la tarjeta de la hoja, solo queda la
+      // etiqueta del marcador flotante.
+      expect(find.text('Tu ubicación actual'), findsOneWidget);
 
-      // La pantalla sigue funcional: el CTA de destino sigue ahí.
-      expect(find.text('Selecciona un destino'), findsNWidgets(2));
+      // La pantalla sigue funcional: el disparador de búsqueda sigue
+      // ahí, habilitado (el fallo fue en la dirección, no en el GPS).
+      expect(
+        find.byKey(const ValueKey('home-search-trigger')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('la dirección real de la cotización siempre gana sobre la '
@@ -878,9 +893,10 @@ void main() {
         rideRepository: rideRepository,
       );
 
-      // HOME-LAYOUT-R1: aparece en la etiqueta del marcador y en la
-      // tarjeta origen/destino de la hoja.
-      expect(find.text('Preemptiva: Jr. Lima 250'), findsNWidgets(2));
+      // HOME-FLOW-R1: sin destino, solo la etiqueta del marcador
+      // flotante muestra la dirección ('Preemptiva: Jr. Lima 250' no
+      // tiene coma, así que no hay nada que recortar).
+      expect(find.text('Preemptiva: Jr. Lima 250'), findsOneWidget);
 
       await _selectDestinationOnMap(tester);
 
@@ -979,10 +995,9 @@ void main() {
       fareRepository.resolveOriginAddressCall(0);
       await _flushAsync(tester);
 
-      // HOME-LAYOUT-R1: la tarjeta de la hoja muestra el texto
-      // completo; el marcador muestra la versión corta (ver el grupo
-      // de tests dedicado más abajo).
-      expect(find.text('Calle Rioja 495, Tarapoto'), findsOneWidget);
+      // HOME-FLOW-R1: sin destino, solo la etiqueta del marcador
+      // (versión corta) — ver el grupo de tests dedicado más abajo.
+      expect(find.text('Calle Rioja 495'), findsOneWidget);
 
       // Un tap posterior, ya con la dirección resuelta y sin
       // movimiento, tampoco dispara una llamada nueva.
@@ -995,8 +1010,8 @@ void main() {
   group('HOME-LAYOUT-R1 — etiqueta corta del marcador propio', () {
     testWidgets(
       'con coma en la dirección, el marcador muestra solo la parte antes '
-      'de la primera coma; la tarjeta de la hoja conserva la dirección '
-      'completa',
+      'de la primera coma; sin destino no hay tarjeta que muestre la '
+      'dirección completa',
       (tester) async {
         final fareRepository = _FakeFareRepository(
           estimatedFare: '7.00',
@@ -1011,9 +1026,11 @@ void main() {
         );
 
         expect(find.text('Calle Rioja 495'), findsOneWidget);
+        // HOME-FLOW-R1: la tarjeta que mostraba la dirección completa
+        // ya no vive en Home vacío.
         expect(
           find.text('Calle Rioja 495, Tarapoto 22202, Perú'),
-          findsOneWidget,
+          findsNothing,
         );
       },
     );
@@ -1034,14 +1051,15 @@ void main() {
           rideRepository: rideRepository,
         );
 
-        // Aparece completo en ambos lugares: no hay coma que recortar,
-        // así que la etiqueta corta y la dirección completa coinciden.
-        expect(find.text('Terminal Terrestre'), findsNWidgets(2));
+        // HOME-FLOW-R1: un solo lugar (el marcador) muestra la
+        // dirección en Home vacío -- no hay coma que recortar, así que
+        // la etiqueta corta coincide con la completa de todas formas.
+        expect(find.text('Terminal Terrestre'), findsOneWidget);
       },
     );
 
     testWidgets(
-      'al elegir destino oculta la etiqueta del origen y conserva el origen '
+      'al elegir destino oculta la etiqueta del origen y muestra el origen '
       'en la tarjeta de la hoja',
       (tester) async {
         final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
@@ -1054,7 +1072,9 @@ void main() {
         );
 
         expect(find.text('Calle Rioja 495'), findsOneWidget);
-        expect(find.text('Calle Rioja 495, Tarapoto'), findsOneWidget);
+        // HOME-FLOW-R1: sin destino, la tarjeta con la dirección
+        // completa todavía no existe.
+        expect(find.text('Calle Rioja 495, Tarapoto'), findsNothing);
 
         await _selectDestinationOnMap(tester);
 
@@ -1079,7 +1099,12 @@ void main() {
       );
 
       expect(rideRepository.getHistoryCallCount, 1);
-      expect(find.byIcon(Icons.history), findsNothing);
+      // HOME-FLOW-R1: lista vertical con clave propia, ya no chips
+      // identificadas por el ícono de historial.
+      expect(
+        find.byKey(const ValueKey('suggested-destinations-list')),
+        findsNothing,
+      );
     });
 
     testWidgets(
@@ -1231,7 +1256,12 @@ void main() {
 
       await _selectDestinationOnMap(tester);
 
-      expect(find.byIcon(Icons.history), findsNothing);
+      // HOME-FLOW-R1: la lista de sugeridos es exclusiva de Home
+      // vacío -- ya no existe ninguna hoja vacía que la muestre.
+      expect(
+        find.byKey(const ValueKey('suggested-destinations-list')),
+        findsNothing,
+      );
     });
   });
 }
@@ -1260,23 +1290,31 @@ Future<void> _tapCenterOnMyLocation(WidgetTester tester) async {
   await _flushAsync(tester);
 }
 
-/// G4B-R5.2: escribe en el buscador, deja pasar el debounce real
-/// (450ms), flushea `autocomplete()`, y toca la primera predicción —
-/// mismo camino real que usaría el Passenger.
-final _destinationSearchFieldFinder = find.byKey(
-  const ValueKey('destination-search-field'),
-);
-
+/// G4B-R5.2, adaptado en `HOME-FLOW-R1` (etapa 3): la búsqueda ya no
+/// es un campo inline de Home -- toca el disparador para abrir
+/// `SearchDestinationScreen` (empuje real de `Navigator`, `_pumpHomeScreen`
+/// ya envuelve `HomeScreen` en un `MaterialApp` que provee su propio
+/// `Navigator`), escribe ahí, deja pasar el debounce real (450ms),
+/// flushea `autocomplete()`, y toca la primera predicción -- mismo
+/// camino real que usaría el Passenger, solo que ahora cruza una
+/// pantalla completa en vez de un campo inline.
 Future<void> _selectDestinationViaAutocomplete(
   WidgetTester tester, {
   required String query,
   required PlacePrediction prediction,
 }) async {
-  await tester.enterText(_destinationSearchFieldFinder, query);
+  await tester.tap(find.byKey(const ValueKey('home-search-trigger')));
+  await tester.pumpAndSettle();
+
+  await tester.enterText(
+    find.byKey(const ValueKey('search-destination-field')),
+    query,
+  );
   await tester.pump(const Duration(milliseconds: 500));
   await _flushAsync(tester);
 
   await tester.tap(find.text(prediction.primaryText));
+  await tester.pumpAndSettle();
   await _flushAsync(tester);
 }
 

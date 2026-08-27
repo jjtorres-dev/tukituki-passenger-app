@@ -13,15 +13,16 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../core/theme/passenger_colors.dart';
+import '../../core/widgets/tuki_search_bar.dart';
 import '../auth/data/auth_repository.dart';
 import '../fare/data/fare_repository.dart';
 import '../fare/domain/fare_estimate.dart';
-import '../places/data/places_repository.dart';
-import '../places/domain/place_prediction.dart';
 import '../ride/data/ride_repository.dart';
 import '../ride/domain/fare_amount.dart';
 import '../ride/domain/ride_history_item.dart';
+import 'domain/search_destination_result.dart';
 import 'domain/suggested_destinations.dart';
+import 'search_destination_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -281,15 +282,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await _loadCurrentLocation();
   }
 
-  final TextEditingController _destinationSearchController =
-      TextEditingController();
-
   final TextEditingController _passengerOfferController =
       TextEditingController();
 
-  final FocusNode _destinationSearchFocusNode = FocusNode();
+  /// Nunca se escribe nada acá — `TukiSearchBar` de Home vacío es un
+  /// disparador de navegación (`readOnly` + `onTap`), no un campo de
+  /// texto real (`HOME-FLOW-R1`, etapa 3). El controller solo satisface
+  /// el parámetro requerido del widget.
+  final TextEditingController _searchTriggerController =
+      TextEditingController();
 
-  Timer? _searchDebounce;
   Timer? _quoteExpiryTimer;
 
   Position? _currentPosition;
@@ -350,8 +352,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// `_manualDestinationPlaceholder`.
   bool _destinationIsManualSelection = false;
 
-  List<PlacePrediction> _placePredictions = const [];
-
   /// SUGGESTED-DESTINATIONS-R1: hasta [suggestedDestinationsCount]
   /// destinos frecuentes del historial del pasajero, ya calculados por
   /// `resolveSuggestedDestinations`. Vacía mientras carga o si el
@@ -366,15 +366,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
    */
   List<LatLng> _routePoints = const [];
 
-  String? _placesSessionToken;
-  String? _placeSearchMessage;
   String? _locationMessage;
 
   bool _locating = false;
   bool _loading = false;
   bool _requestingRide = false;
-  bool _searchingPlaces = false;
-  bool _loadingPlaceDetails = false;
 
   FareEstimate? _quote;
 
@@ -443,11 +439,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
-    _searchDebounce?.cancel();
     _quoteExpiryTimer?.cancel();
-    _destinationSearchController.dispose();
     _passengerOfferController.dispose();
-    _destinationSearchFocusNode.dispose();
+    _searchTriggerController.dispose();
     _mapController?.dispose();
 
     super.dispose();
@@ -487,33 +481,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
       _estimateFare();
     });
-  }
-
-  String _createPlacesSessionToken() {
-    final random = Random.secure();
-    final buffer = StringBuffer();
-
-    for (var i = 0; i < 16; i++) {
-      final value = random.nextInt(256);
-
-      buffer.write(value.toRadixString(16).padLeft(2, '0'));
-    }
-
-    return buffer.toString();
-  }
-
-  String _ensurePlacesSessionToken() {
-    final existing = _placesSessionToken;
-
-    if (existing != null) {
-      return existing;
-    }
-
-    final token = _createPlacesSessionToken();
-
-    _placesSessionToken = token;
-
-    return token;
   }
 
   Future<void> _loadCurrentLocation() async {
@@ -904,12 +871,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _selectDestination(LatLng destination) {
-    _searchDebounce?.cancel();
     _cancelQuoteExpiryTimer();
-
-    _destinationSearchFocusNode.unfocus();
-    _destinationSearchController.clear();
-
     _advanceDestinationGeneration();
 
     setState(() {
@@ -921,10 +883,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
       _destinationIsManualSelection = true;
 
-      _placePredictions = const [];
-      _placeSearchMessage = null;
-      _placesSessionToken = null;
-
       _quote = null;
       _routePoints = const [];
       _loading = false;
@@ -934,11 +892,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _clearDestination() {
-    _searchDebounce?.cancel();
     _cancelQuoteExpiryTimer();
-
-    _destinationSearchController.clear();
-
     _advanceDestinationGeneration();
 
     setState(() {
@@ -947,132 +901,61 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _selectedDestinationName = null;
       _destinationIsManualSelection = false;
 
-      _placePredictions = const [];
-      _placeSearchMessage = null;
-      _placesSessionToken = null;
-
       _quote = null;
       _routePoints = const [];
       _loading = false;
     });
   }
 
-  Future<void> _onDestinationSearchChanged(String value) async {
-    _searchDebounce?.cancel();
-
-    final query = value.trim();
-
-    if (_selectedDestination != null) {
-      _cancelQuoteExpiryTimer();
-      _advanceDestinationGeneration();
-
-      setState(() {
-        _selectedDestination = null;
-        _selectedDestinationAddress = null;
-        _selectedDestinationName = null;
-        _destinationIsManualSelection = false;
-
-        _quote = null;
-        _routePoints = const [];
-        _loading = false;
-      });
-    }
-
-    if (query.length < 2) {
-      setState(() {
-        _placePredictions = const [];
-        _placeSearchMessage = null;
-        _searchingPlaces = false;
-      });
-
-      return;
-    }
-
+  /// Abre `SearchDestinationScreen` (`HOME-FLOW-R1`, etapa 3) y aplica
+  /// el resultado con el mismo camino que ya usaba
+  /// `_selectPlacePrediction` antes de este checkpoint — la búsqueda en
+  /// sí (autocompletado, debounce, `getDetails`) ahora vive
+  /// completamente en esa pantalla, Home solo consume su resultado.
+  Future<void> _openSearchDestination() async {
     final position = _currentPosition;
 
     if (position == null) {
-      setState(() {
-        _placePredictions = const [];
-
-        _placeSearchMessage = 'Esperando tu ubicación GPS...';
-      });
-
       return;
     }
 
-    final sessionToken = _ensurePlacesSessionToken();
+    final result = await Navigator.of(context).push<SearchDestinationResult>(
+      MaterialPageRoute(
+        builder: (_) => SearchDestinationScreen(
+          originAddress: _originAddressLabel(_quote, position),
+          originCoordinates: LatLng(position.latitude, position.longitude),
+        ),
+      ),
+    );
 
-    _searchDebounce = Timer(const Duration(milliseconds: 450), () async {
-      if (!mounted) {
-        return;
-      }
+    if (result == null || !mounted) {
+      return;
+    }
 
-      setState(() {
-        _searchingPlaces = true;
-        _placeSearchMessage = null;
-      });
+    await _applySearchResult(result);
+  }
 
-      try {
-        final results = await ref
-            .read(placesRepositoryProvider)
-            .autocomplete(
-              input: query,
-              latitude: position.latitude,
-              longitude: position.longitude,
-              sessionToken: sessionToken,
-            );
+  Future<void> _applySearchResult(SearchDestinationResult result) async {
+    _cancelQuoteExpiryTimer();
+    _advanceDestinationGeneration();
 
-        if (!mounted) {
-          return;
-        }
+    setState(() {
+      _selectedDestination = result.destination;
 
-        if (_destinationSearchController.text.trim() != query) {
-          return;
-        }
+      _selectedDestinationName = result.name;
 
-        setState(() {
-          _placePredictions = results;
+      _selectedDestinationAddress = result.address;
 
-          _placeSearchMessage = results.isEmpty
-              ? 'No encontramos destinos con ese nombre.'
-              : null;
-        });
-      } on DioException catch (error) {
-        if (!mounted) {
-          return;
-        }
+      _destinationIsManualSelection = false;
 
-        final backendMessage = _backendMessage(error);
-
-        setState(() {
-          _placePredictions = const [];
-
-          _placeSearchMessage =
-              backendMessage ??
-              (error.response == null
-                  ? 'No se pudo conectar con TukiTuki.'
-                  : 'No se pudo buscar el destino.');
-        });
-      } catch (error) {
-        debugPrint('Error buscando destinos: $error');
-
-        if (!mounted) {
-          return;
-        }
-
-        setState(() {
-          _placePredictions = const [];
-
-          _placeSearchMessage = 'No se pudo buscar el destino.';
-        });
-      } finally {
-        if (mounted && _destinationSearchController.text.trim() == query) {
-          setState(() {
-            _searchingPlaces = false;
-          });
-        }
-      }
+      _quote = null;
+      _routePoints = const [];
+      _loading = false;
     });
+
+    await _moveCameraToDestination(result.destination);
+
+    _maybeAutoEstimateFare();
   }
 
   /// SUGGESTED-DESTINATIONS-R1: pide el historial completado del
@@ -1104,11 +987,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  /// SUGGESTED-DESTINATIONS-R1: mismo camino que
-  /// `_selectPlacePrediction` a partir de fijar el destino — pero sin
-  /// las dos llamadas a Google (`autocomplete`+`getDetails`), porque
-  /// [suggestion] ya trae coordenadas reales resueltas por Backend
-  /// (`GET fares/origin-address` no interviene acá; esto es
+  /// SUGGESTED-DESTINATIONS-R1: mismo camino que `_applySearchResult`
+  /// a partir de fijar el destino — pero sin las dos llamadas a
+  /// Google (`autocomplete`+`getDetails`), porque [suggestion] ya trae
+  /// coordenadas reales resueltas por Backend (`GET
+  /// fares/origin-address` no interviene acá; esto es
   /// `destinationLatitude`/`destinationLongitude` del historial).
   Future<void> _selectSuggestedDestination(RideHistoryItem suggestion) async {
     final latitude = suggestion.destinationLatitude;
@@ -1119,10 +1002,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     final destination = LatLng(latitude, longitude);
-
-    _destinationSearchFocusNode.unfocus();
-
-    _destinationSearchController.text = suggestion.destinationAddress;
 
     _cancelQuoteExpiryTimer();
     _advanceDestinationGeneration();
@@ -1136,10 +1015,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
       _destinationIsManualSelection = false;
 
-      _placePredictions = const [];
-      _placeSearchMessage = null;
-      _placesSessionToken = null;
-
       _quote = null;
       _routePoints = const [];
       _loading = false;
@@ -1148,90 +1023,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await _moveCameraToDestination(destination);
 
     _maybeAutoEstimateFare();
-  }
-
-  Future<void> _selectPlacePrediction(PlacePrediction prediction) async {
-    if (_loadingPlaceDetails) {
-      return;
-    }
-
-    final sessionToken = _ensurePlacesSessionToken();
-
-    _destinationSearchFocusNode.unfocus();
-
-    setState(() {
-      _loadingPlaceDetails = true;
-      _placeSearchMessage = null;
-    });
-
-    try {
-      final details = await ref
-          .read(placesRepositoryProvider)
-          .getDetails(placeId: prediction.placeId, sessionToken: sessionToken);
-
-      if (!mounted) {
-        return;
-      }
-
-      final destination = LatLng(details.latitude, details.longitude);
-
-      _destinationSearchController.text = prediction.primaryText;
-
-      _cancelQuoteExpiryTimer();
-      _advanceDestinationGeneration();
-
-      setState(() {
-        _selectedDestination = destination;
-
-        _selectedDestinationName = prediction.primaryText;
-
-        _selectedDestinationAddress = details.formattedAddress;
-
-        _destinationIsManualSelection = false;
-
-        _placePredictions = const [];
-        _placeSearchMessage = null;
-        _placesSessionToken = null;
-
-        _quote = null;
-        _routePoints = const [];
-        _loading = false;
-      });
-
-      await _moveCameraToDestination(destination);
-    } on DioException catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      final backendMessage = _backendMessage(error);
-
-      setState(() {
-        _placeSearchMessage =
-            backendMessage ??
-            (error.response == null
-                ? 'No se pudo conectar con TukiTuki.'
-                : 'No se pudo obtener el destino seleccionado.');
-      });
-    } catch (error) {
-      debugPrint('Error obteniendo detalles del lugar: $error');
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _placeSearchMessage = 'No se pudo obtener el destino seleccionado.';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loadingPlaceDetails = false;
-        });
-
-        _maybeAutoEstimateFare();
-      }
-    }
   }
 
   /// HOME-LAYOUT-R1: el origen usa un `Marker` real de Google Maps con
@@ -1319,14 +1110,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     return null;
-  }
-
-  String _formatPredictionDistance(int distanceMeters) {
-    if (distanceMeters < 1000) {
-      return '$distanceMeters m';
-    }
-
-    return '${(distanceMeters / 1000).toStringAsFixed(1)} km';
   }
 
   List<LatLng> _decodePolyline(String encoded) {
@@ -1752,39 +1535,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// SUGGESTED-DESTINATIONS-R1: pastilla tocable de destino sugerido.
-  /// Deshabilitada (sin `onTap`, atenuada) mientras no hay GPS —
-  /// tocarla antes fijaría el destino igual, pero `_maybeAutoEstimateFare`
-  /// no dispara la cotización hasta tener origen, así que se evita
-  /// mostrar un control activo que no hace nada visible todavía.
-  Widget _buildSuggestedDestinationChip(
+  /// SUGGESTED-DESTINATIONS-R1, formato lista vertical desde
+  /// `HOME-FLOW-R1` (etapa 3) — reemplaza la pastilla horizontal
+  /// original: verificado en emulador que los chips truncaban la
+  /// dirección y de todas formas terminaban apilados verticalmente en
+  /// la práctica, así que el formato de chip no aportaba nada sobre
+  /// una lista. Sin `ConstrainedBox`/`maxWidth` artificial — el nombre
+  /// se ve completo salvo que realmente no entre en una línea.
+  /// Deshabilitada (sin `onTap`, atenuada) mientras no hay GPS — mismo
+  /// motivo que la pastilla original: tocarla antes fijaría el destino
+  /// igual, pero `_maybeAutoEstimateFare` no dispara la cotización
+  /// hasta tener origen.
+  Widget _buildSuggestedDestinationRow(
     RideHistoryItem suggestion, {
     required bool enabled,
   }) {
     return InkWell(
       key: ValueKey('suggested-destination-${suggestion.rideId}'),
-      borderRadius: BorderRadius.circular(30),
       onTap: enabled ? () => _selectSuggestedDestination(suggestion) : null,
       child: Opacity(
         opacity: enabled ? 1 : 0.5,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: PassengerColors.crema,
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: PassengerColors.bordeSuave),
-          ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
-                Icons.history,
-                size: 16,
-                color: PassengerColors.verdeMarca,
+                Icons.location_on,
+                size: 20,
+                color: PassengerColors.destino,
               ),
-              const SizedBox(width: 6),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 160),
+              const SizedBox(width: 12),
+              Expanded(
                 child: Text(
                   suggestion.destinationAddress,
                   maxLines: 1,
@@ -1792,7 +1573,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   style: const TextStyle(
                     color: PassengerColors.textoPrimario,
                     fontWeight: FontWeight.w600,
-                    fontSize: 13,
+                    fontSize: 15,
                   ),
                 ),
               ),
@@ -1813,8 +1594,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         position != null &&
         destination != null &&
         !_loading &&
-        !_requestingRide &&
-        !_loadingPlaceDetails;
+        !_requestingRide;
 
     final quoteExpired = quote != null && _isQuoteExpired(quote);
 
@@ -2346,25 +2126,123 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 keyboardDismissBehavior:
                     ScrollViewKeyboardDismissBehavior.onDrag,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                child: _buildSheetContent(
-                  position: position,
-                  destination: destination,
-                  quote: quote,
-                  quoteExpired: quoteExpired,
-                ),
+                child: destination == null
+                    ? _buildEmptySheetContent(position: position)
+                    : _buildSheetContent(
+                        position: position,
+                        destination: destination,
+                        quote: quote,
+                        quoteExpired: quoteExpired,
+                      ),
               ),
             ),
-            _buildCtaFooter(
-              keyboardVisible: keyboardVisible,
-              ctaLabel: ctaLabel,
-              ctaOnPressed: ctaOnPressed,
-              ctaIcon: ctaIcon,
-              ctaShowsProgress: ctaShowsProgress,
-              ctaButtonStyle: ctaButtonStyle,
-            ),
+            // HOME-FLOW-R1 (etapa 3): sin destino no hay footer de CTA
+            // — "Selecciona un destino" no existía para hacer nada más
+            // que ocupar espacio deshabilitado. Home vacío no tiene
+            // ningún CTA que mostrar todavía.
+            if (destination != null)
+              _buildCtaFooter(
+                keyboardVisible: keyboardVisible,
+                ctaLabel: ctaLabel,
+                ctaOnPressed: ctaOnPressed,
+                ctaIcon: ctaIcon,
+                ctaShowsProgress: ctaShowsProgress,
+                ctaButtonStyle: ctaButtonStyle,
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Contenido de la hoja de Home vacío (`HOME-FLOW-R1`, etapa 3): solo
+  /// título, disparador de búsqueda y sugeridos — sin tarjeta
+  /// origen/destino (se muda arriba en la etapa 4) y sin CTA (ver
+  /// `_buildSheet`).
+  Widget _buildEmptySheetContent({required Position? position}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          '¿A dónde vamos?',
+          style: TextStyle(
+            color: PassengerColors.verdeMarca,
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.7,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        if (_locationMessage != null)
+          Container(
+            decoration: BoxDecoration(
+              color: PassengerColors.fondoAviso,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: PassengerColors.aviso.withValues(alpha: 0.22),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_off, color: PassengerColors.aviso),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _locationMessage!,
+                      style: const TextStyle(
+                        color: PassengerColors.textoPrimario,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        const SizedBox(height: 16),
+
+        // Disparador de navegación, no campo editable — toca y abre
+        // `SearchDestinationScreen`. Nunca escribe nada acá (ver
+        // doc-comment de `TukiSearchBar.onTap`).
+        TukiSearchBar(
+          key: const ValueKey('home-search-trigger'),
+          controller: _searchTriggerController,
+          hintText: 'Buscar destino',
+          enabled: position != null,
+          readOnly: true,
+          onTap: _openSearchDestination,
+        ),
+
+        if (_suggestedDestinations.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Container(
+            key: const ValueKey('suggested-destinations-list'),
+            child: Column(
+              children: [
+                for (
+                  var index = 0;
+                  index < _suggestedDestinations.length;
+                  index++
+                ) ...[
+                  _buildSuggestedDestinationRow(
+                    _suggestedDestinations[index],
+                    enabled: position != null,
+                  ),
+                  if (index != _suggestedDestinations.length - 1)
+                    const Divider(height: 1, color: PassengerColors.bordeSuave),
+                ],
+              ],
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 20),
+      ],
     );
   }
 
@@ -2417,146 +2295,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
           ),
-
-        const SizedBox(height: 16),
-
-        TextField(
-          key: const ValueKey('destination-search-field'),
-          controller: _destinationSearchController,
-          focusNode: _destinationSearchFocusNode,
-          enabled: position != null && !_loadingPlaceDetails,
-          textInputAction: TextInputAction.search,
-          autocorrect: false,
-          onChanged: _onDestinationSearchChanged,
-          decoration: InputDecoration(
-            hintText: 'Buscar destino',
-            hintStyle: const TextStyle(
-              color: PassengerColors.textoSecundario,
-              fontWeight: FontWeight.w500,
-            ),
-            prefixIcon: const Icon(
-              Icons.search,
-              color: PassengerColors.verdeMarca,
-            ),
-            suffixIcon: _loadingPlaceDetails
-                ? const Padding(
-                    padding: EdgeInsets.all(14),
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : _destinationSearchController.text.isNotEmpty
-                ? IconButton(
-                    tooltip: 'Limpiar destino',
-                    onPressed: _clearDestination,
-                    icon: const Icon(Icons.close),
-                  )
-                : null,
-            filled: true,
-            fillColor: PassengerColors.crema,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 14,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(color: PassengerColors.bordeSuave),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(color: PassengerColors.bordeSuave),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(
-                color: PassengerColors.acento,
-                width: 1.5,
-              ),
-            ),
-            disabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(15),
-              borderSide: const BorderSide(color: PassengerColors.bordeSuave),
-            ),
-          ),
-        ),
-
-        if (_selectedDestination == null &&
-            _placePredictions.isEmpty &&
-            _suggestedDestinations.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final suggestion in _suggestedDestinations)
-                _buildSuggestedDestinationChip(
-                  suggestion,
-                  enabled: position != null,
-                ),
-            ],
-          ),
-        ],
-
-        if (_searchingPlaces) ...[
-          const SizedBox(height: 12),
-          const LinearProgressIndicator(
-            color: PassengerColors.acento,
-            backgroundColor: PassengerColors.bordeSuave,
-          ),
-        ],
-
-        if (_placeSearchMessage != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            _placeSearchMessage!,
-            style: const TextStyle(color: PassengerColors.textoSecundario),
-          ),
-        ],
-
-        if (_placePredictions.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Card(
-            margin: EdgeInsets.zero,
-            color: PassengerColors.crema,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: PassengerColors.bordeSuave),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (
-                  var index = 0;
-                  index < _placePredictions.length;
-                  index++
-                ) ...[
-                  ListTile(
-                    leading: const Icon(
-                      Icons.location_on,
-                      color: PassengerColors.destino,
-                    ),
-                    title: Text(_placePredictions[index].primaryText),
-                    subtitle: _placePredictions[index].secondaryText.isEmpty
-                        ? null
-                        : Text(_placePredictions[index].secondaryText),
-                    trailing: _placePredictions[index].distanceMeters == null
-                        ? null
-                        : Text(
-                            _formatPredictionDistance(
-                              _placePredictions[index].distanceMeters!,
-                            ),
-                          ),
-                    onTap: _loadingPlaceDetails
-                        ? null
-                        : () =>
-                              _selectPlacePrediction(_placePredictions[index]),
-                  ),
-                  if (index != _placePredictions.length - 1)
-                    const Divider(height: 1, color: PassengerColors.bordeSuave),
-                ],
-              ],
-            ),
-          ),
-        ],
 
         const SizedBox(height: 20),
 
