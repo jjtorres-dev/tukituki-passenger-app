@@ -589,13 +589,25 @@ void main() {
       expect(fareRepository.callCount, 1);
       expect(fareRepository.requestedIsManualSelection[0], isTrue);
 
-      // HOME-FLOW-R1: a diferencia del campo inline anterior (que
-      // permitía escribir encima de un destino ya elegido y lo
-      // reemplazaba solo), el disparador de búsqueda ya no existe en
-      // Home con destino -- primero hay que volver a Home vacío
-      // tocando "Quitar destino" en la tarjeta.
-      await tester.tap(find.byTooltip('Quitar destino'));
+      // HOME-FLOW-R1 etapa 4: con destino, back no vuelve a la pantalla de
+      // búsqueda ni sale de Home; consume el pop y llama al mismo
+      // `_clearDestination` que usa "Quitar destino" en la tarjeta.
+      await tester.binding.handlePopRoute();
       await _flushAsync(tester);
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('search-destination-field')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('origin-destination-card')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('home-search-trigger')),
+        findsOneWidget,
+      );
 
       await _selectDestinationViaAutocomplete(
         tester,
@@ -811,6 +823,9 @@ void main() {
         expect(tester.takeException(), isNull);
       }
 
+      tester.view.resetViewInsets();
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
@@ -956,11 +971,18 @@ void main() {
       expect(fareRepository.requestedOriginCoordinates[1], [-6.4977, -76.3599]);
     });
 
-    testWidgets('varios taps rápidos sin moverse producen una sola llamada al '
-        'repositorio, no una por tap', (tester) async {
+    testWidgets('varios taps rápidos sin moverse producen una sola llamada y '
+        'la respuesta tardía vuelve a medir el overlay superior', (
+      tester,
+    ) async {
+      const longOriginAddress =
+          'Avenida Circunvalación 1845, referencia frente al mercado de '
+          'productores del barrio Partido Alto, Tarapoto, San Martín, Perú';
       final fareRepository = _FakeFareRepository(
         estimatedFare: '7.00',
-        originAddress: 'Calle Rioja 495, Tarapoto',
+        originAddress: longOriginAddress,
+        quoteOriginAddress: '',
+        routePolyline: '??AA',
         holdOriginAddressRequests: true,
       );
       final rideRepository = _FakeRideRepository();
@@ -990,14 +1012,35 @@ void main() {
 
       expect(fareRepository.originAddressCallCount, 1);
 
+      // La tarjeta ya está visible y la ruta activa antes de que llegue
+      // `_resolveOriginAddress`: reproduce el cambio de alto tardío que
+      // rompía el encuadre cuando la geometría se estimaba a mano.
+      await _selectDestinationOnMap(tester);
+      final card = find.byKey(const ValueKey('origin-destination-card'));
+      final initialCardHeight = tester.getSize(card).height;
+      final initialTopPadding = tester
+          .widget<GoogleMap>(find.byType(GoogleMap))
+          .padding
+          .top;
+      final dynamic state = tester.state(find.byType(HomeScreen));
+      final int initialScheduleGeneration =
+          state.debugRouteFitScheduleGeneration as int;
+
       // Al responder la única llamada real, se refleja con
-      // normalidad.
+      // normalidad y el mismo programador de reencuadre vuelve a correr.
       fareRepository.resolveOriginAddressCall(0);
       await _flushAsync(tester);
 
-      // HOME-FLOW-R1: sin destino, solo la etiqueta del marcador
-      // (versión corta) — ver el grupo de tests dedicado más abajo.
-      expect(find.text('Calle Rioja 495'), findsOneWidget);
+      expect(find.text(longOriginAddress), findsOneWidget);
+      expect(tester.getSize(card).height, greaterThan(initialCardHeight));
+      expect(
+        tester.widget<GoogleMap>(find.byType(GoogleMap)).padding.top,
+        greaterThan(initialTopPadding),
+      );
+      expect(
+        state.debugRouteFitScheduleGeneration as int,
+        greaterThan(initialScheduleGeneration),
+      );
 
       // Un tap posterior, ya con la dirección resuelta y sin
       // movimiento, tampoco dispara una llamada nueva.
@@ -1060,7 +1103,7 @@ void main() {
 
     testWidgets(
       'al elegir destino oculta la etiqueta del origen y muestra el origen '
-      'en la tarjeta de la hoja',
+      'en la tarjeta flotante superior',
       (tester) async {
         final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
         final rideRepository = _FakeRideRepository();
@@ -1072,7 +1115,7 @@ void main() {
         );
 
         expect(find.text('Calle Rioja 495'), findsOneWidget);
-        // HOME-FLOW-R1: sin destino, la tarjeta con la dirección
+        // HOME-FLOW-R1: sin destino, la tarjeta flotante con la dirección
         // completa todavía no existe.
         expect(find.text('Calle Rioja 495, Tarapoto'), findsNothing);
 
@@ -1081,6 +1124,27 @@ void main() {
         expect(find.text('Calle Rioja 495'), findsNothing);
         expect(find.text('Tu ubicación actual'), findsOneWidget);
         expect(find.text('Destino seleccionado en el mapa'), findsWidgets);
+
+        final card = find.byKey(const ValueKey('origin-destination-card'));
+        final sheet = find.byKey(const ValueKey('home-bottom-sheet'));
+        final cardRect = tester.getRect(card);
+        final mapRect = tester.getRect(find.byType(GoogleMap));
+        final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+
+        expect(cardRect.left, mapRect.left + 20);
+        expect(cardRect.right, mapRect.right - 20);
+        expect(
+          cardRect.top,
+          greaterThan(tester.getBottomLeft(find.byTooltip('Cerrar sesión')).dy),
+        );
+        expect(map.padding.top, closeTo(cardRect.bottom - mapRect.top, 0.01));
+        expect(map.padding.bottom, greaterThan(0));
+        expect(find.descendant(of: sheet, matching: card), findsNothing);
+        expect(
+          find.descendant(of: sheet, matching: _offerFieldFinder),
+          findsOneWidget,
+        );
+        expect(find.text('¿A dónde vamos?'), findsNothing);
       },
     );
   });
@@ -1491,6 +1555,8 @@ class _FakeFareRepository extends FareRepository {
     this.holdRequests = false,
     this.destinationAddressOverrides,
     this.originAddress = 'Calle Rioja 495, Tarapoto',
+    this.quoteOriginAddress = 'Tu ubicación actual',
+    this.routePolyline,
     this.failOriginAddress = false,
     this.holdOriginAddressRequests = false,
   }) : super(Dio());
@@ -1537,6 +1603,14 @@ class _FakeFareRepository extends FareRepository {
   /// `getOriginAddress`. Fija por defecto para no obligar a cada test
   /// existente a conocer este flujo nuevo.
   String originAddress;
+
+  /// Dirección de origen incluida en el FareQuote. Puede dejarse vacía
+  /// para comprobar que una resolución preemptiva tardía cambia el alto
+  /// de la tarjeta aunque la ruta ya esté activa.
+  String quoteOriginAddress;
+
+  /// Polyline opcional para activar el mecanismo real de encuadre de ruta.
+  String? routePolyline;
 
   /// Si es `true`, `getOriginAddress` lanza — simula un fallo de red
   /// hacia el endpoint nuevo (nunca un fallo de Google, que el
@@ -1620,9 +1694,9 @@ class _FakeFareRepository extends FareRepository {
       expiresAt: expired
           ? DateTime.now().subtract(const Duration(seconds: 1))
           : DateTime.now().add(ttl),
-      originAddress: 'Tu ubicación actual',
+      originAddress: quoteOriginAddress,
       destinationAddress: resolvedDestinationAddress,
-      routePolyline: null,
+      routePolyline: routePolyline,
     );
 
     if (!holdRequests) {

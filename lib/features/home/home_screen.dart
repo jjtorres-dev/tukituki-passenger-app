@@ -98,6 +98,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// Se actualiza en cada `build()` desde `MediaQuery`.
   double _devicePixelRatio = 1;
 
+  /// HOME-FLOW-R1: alto real (medido, no estimado) del bloque superior
+  /// menú+tarjeta origen/destino. Incluye los 14 px que separan el menú
+  /// del borde superior del mapa, para que GoogleMap.padding.top
+  /// describa toda el área ocupada por el overlay y no solo sus hijos.
+  double _topOverlayHeight = 0;
+
   /// HOME-LAYOUT-R1: alto real (medido, no estimado) del bloque
   /// recentrar+hoja anclado al fondo del Stack. Se usa para dos cosas
   /// que TIENEN que coincidir entre sí: dónde se centra el marcador
@@ -138,13 +144,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _cameraUserMoveGeneration = 0;
   final Set<int> _activeMapPointers = <int>{};
 
+  void _handleTopOverlaySizeChanged(Size size) {
+    _handleOverlaySizeChanged(size: size, isTopOverlay: true);
+  }
+
   void _handleBottomOverlaySizeChanged(Size size) {
-    if (!mounted || size.height == _bottomOverlayHeight) {
+    _handleOverlaySizeChanged(size: size, isTopOverlay: false);
+  }
+
+  /// Los overlays superior e inferior alimentan exactamente el mismo
+  /// mecanismo de reencuadre. Cualquier cambio de geometría —incluido el
+  /// alto nuevo que puede producir la dirección de origen asíncrona—
+  /// programa un nuevo ajuste con ambos paddings ya actualizados.
+  void _handleOverlaySizeChanged({
+    required Size size,
+    required bool isTopOverlay,
+  }) {
+    final currentHeight = isTopOverlay
+        ? _topOverlayHeight
+        : _bottomOverlayHeight;
+
+    if (!mounted || size.height == currentHeight) {
       return;
     }
 
     setState(() {
-      _bottomOverlayHeight = size.height;
+      if (isTopOverlay) {
+        _topOverlayHeight = size.height;
+      } else {
+        _bottomOverlayHeight = size.height;
+      }
     });
 
     final quoteGeneration = _activeRouteQuoteGeneration;
@@ -379,6 +408,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// concurrentes — G4B-R5.1). No se usa en producción.
   @visibleForTesting
   String? get debugQuoteId => _quote?.quoteId;
+
+  /// Permite verificar que una medición tardía de cualquiera de los dos
+  /// overlays reutiliza el programador único de reencuadre.
+  @visibleForTesting
+  int get debugRouteFitScheduleGeneration => _routeFitScheduleGeneration;
 
   /// Generación de la última solicitud de cotización disparada.
   /// Evita que una respuesta/errores tardíos de un `_estimateFare`
@@ -905,6 +939,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _routePoints = const [];
       _loading = false;
     });
+
+    // Sin destino, la ruta encuadrada deja de existir — la cámara vuelve
+    // al origen con el mismo zoom de entrada, reusando el mismo camino
+    // que el botón de recentrar (ver `onMapCreated` y
+    // `_recenterOnCurrentLocation`). `_advanceDestinationGeneration` de
+    // arriba ya invalidó cualquier reencuadre pendiente y bajó
+    // `_activeRouteQuoteGeneration` a null, así que no hay un ajuste
+    // automático activo con el que este recentrado pueda pelear.
+    unawaited(_moveCameraToCurrentLocation());
   }
 
   /// Abre `SearchDestinationScreen` (`HOME-FLOW-R1`, etapa 3) y aplica
@@ -1685,6 +1728,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 builder: (context, constraints) {
                   return Stack(
                     children: [
+                      // PopScope no necesita envolver visualmente el Stack:
+                      // al estar montado bajo la misma ModalRoute registra
+                      // el callback de back, y el hijo vacío no participa del
+                      // layout ni de los gestos sobre el mapa.
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        width: 0,
+                        height: 0,
+                        child: PopScope(
+                          canPop: destination == null,
+                          onPopInvokedWithResult: (didPop, _) {
+                            if (!didPop && _selectedDestination != null) {
+                              _clearDestination();
+                            }
+                          },
+                          child: const SizedBox.shrink(),
+                        ),
+                      ),
                       Positioned.fill(
                         child: Listener(
                           behavior: HitTestBehavior.translucent,
@@ -1715,6 +1777,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                    * marcador propio (ver `_bottomOverlayHeight`).
                    */
                             padding: EdgeInsets.only(
+                              top: _topOverlayHeight,
                               bottom: _bottomOverlayHeight,
                             ),
 
@@ -1839,7 +1902,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           ),
                         ),
 
-                      Positioned(top: 14, left: 14, child: _buildMenuButton()),
+                      // Menú + tarjeta como un único overlay superior medido.
+                      // El padding interno conserva exactamente la posición
+                      // histórica del menú; la tarjeta aparece debajo, con el
+                      // margen lateral de 20 del sistema de diseño.
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: _MeasureSize(
+                          onChange: _handleTopOverlaySizeChanged,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 14),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(left: 14),
+                                    child: _buildMenuButton(),
+                                  ),
+                                ),
+                                if (destination != null) ...[
+                                  const SizedBox(height: 12),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                    ),
+                                    child: _buildOriginDestinationCard(
+                                      position: position,
+                                      destination: destination,
+                                      quote: quote,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
 
                       // Botón de recentrar + hoja inferior, anclados juntos al
                       // fondo del Stack dentro del mismo Column: cuando la
@@ -1867,7 +1970,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 child: _buildRecenterButton(),
                               ),
                               _buildSheet(
-                                maxHeight: constraints.maxHeight * 0.75,
+                                // El bloque inferior completo incluye 40 px
+                                // del FAB pequeño + 14 px de separación. La
+                                // hoja usa solo el espacio que queda debajo
+                                // del overlay superior medido, para que ambos
+                                // bloques nunca se tapen en pantallas bajas.
+                                maxHeight: keyboardVisible
+                                    // Con teclado, la prioridad es conservar
+                                    // visible el CTA y permitir que la región
+                                    // central del panel haga scroll. El mapa
+                                    // queda temporalmente en segundo plano.
+                                    ? constraints.maxHeight * 0.75
+                                    : min(
+                                        constraints.maxHeight * 0.75,
+                                        max(
+                                          0,
+                                          constraints.maxHeight -
+                                              _topOverlayHeight -
+                                              54,
+                                        ),
+                                      ),
                                 keyboardVisible: keyboardVisible,
                                 position: position,
                                 destination: destination,
@@ -2100,6 +2222,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     required ButtonStyle ctaButtonStyle,
   }) {
     return ConstrainedBox(
+      key: const ValueKey('home-bottom-sheet'),
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: DecoratedBox(
         decoration: const BoxDecoration(
@@ -2129,8 +2252,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 child: destination == null
                     ? _buildEmptySheetContent(position: position)
                     : _buildSheetContent(
-                        position: position,
-                        destination: destination,
                         quote: quote,
                         quoteExpired: quoteExpired,
                       ),
@@ -2247,66 +2368,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildSheetContent({
-    required Position? position,
-    required LatLng? destination,
     required FareEstimate? quote,
     required bool quoteExpired,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          '¿A dónde vamos?',
-          style: TextStyle(
-            color: PassengerColors.verdeMarca,
-            fontSize: 28,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.7,
-          ),
-        ),
-
-        const SizedBox(height: 10),
-
-        if (_locationMessage != null)
-          Container(
-            decoration: BoxDecoration(
-              color: PassengerColors.fondoAviso,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: PassengerColors.aviso.withValues(alpha: 0.22),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  const Icon(Icons.location_off, color: PassengerColors.aviso),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _locationMessage!,
-                      style: const TextStyle(
-                        color: PassengerColors.textoPrimario,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-        const SizedBox(height: 20),
-
-        _buildOriginDestinationCard(
-          position: position,
-          destination: destination,
-          quote: quote,
-        ),
-
         if (quote != null) ...[
-          const SizedBox(height: 28),
-
           Container(
             decoration: BoxDecoration(
               color: PassengerColors.verdeMarca,
@@ -2443,24 +2511,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
 
-        const SizedBox(height: 24),
+        if (quote != null) const SizedBox(height: 20),
       ],
     );
   }
 
-  /// Tarjeta origen/destino. Extraída de `_buildSheetContent` en
-  /// `HOME-FLOW-R1` (etapa 1, puro refactor, cero cambio de
-  /// comportamiento) — es el paso previo necesario para poder
-  /// reposicionarla flotando sobre el mapa en la etapa 4, cuando exista
-  /// un destino elegido. Por ahora sigue llamada desde el mismo lugar
-  /// de siempre dentro de la hoja; la única diferencia es que ahora
-  /// vive en su propio método en vez de estar inline.
+  /// Tarjeta origen/destino flotante sobre el mapa (`HOME-FLOW-R1`,
+  /// etapa 4). Su estilo interno permanece igual al de la hoja anterior;
+  /// el `_MeasureSize` superior detecta cualquier variación de alto,
+  /// incluida la llegada asíncrona de la dirección del origen.
   Widget _buildOriginDestinationCard({
     required Position? position,
     required LatLng? destination,
     required FareEstimate? quote,
   }) {
     return Container(
+      key: const ValueKey('origin-destination-card'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: PassengerColors.crema,
