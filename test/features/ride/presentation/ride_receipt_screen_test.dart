@@ -58,7 +58,7 @@ void main() {
       },
     );
 
-    testWidgets('rating no puede enviarse mientras el pago está pendiente', (
+    testWidgets('rating disponible aunque el pago siga pendiente', (
       tester,
     ) async {
       final repository = _FakeRideRepository(
@@ -69,15 +69,19 @@ void main() {
       await _pumpScreen(tester, repository);
       addTearDown(() => _disposeScreen(tester));
 
-      final disabledCta = find.byKey(const ValueKey('rating-disabled-cta'));
-      expect(disabledCta, findsOneWidget);
       expect(
-        tester.widget<OutlinedButton>(disabledCta).onPressed,
-        isNull,
+        find.byKey(const ValueKey('rating-disabled-cta')),
+        findsNothing,
       );
-      expect(find.text('Enviar calificación'), findsNothing);
-      expect(find.text('¿Cómo estuvo tu viaje?'), findsNothing);
-      expect(repository.ratedScore, isNull);
+      expect(find.text('¿Cómo estuvo tu viaje?'), findsOneWidget);
+
+      final submitButton = find.text('Enviar calificación');
+      await tester.ensureVisible(submitButton);
+      await tester.tap(submitButton);
+      await _flushAsync(tester);
+
+      expect(repository.ratedRideId, 'ride-real');
+      expect(repository.ratedScore, 5);
     });
 
     testWidgets('distancia y duración reales se muestran cuando existen', (
@@ -293,7 +297,7 @@ void main() {
 
           expect(tester.takeException(), isNull);
           expect(find.text('Pagado'), findsNothing);
-          expect(find.text('¿Cómo estuvo tu viaje?'), findsNothing);
+          expect(find.text('¿Cómo estuvo tu viaje?'), findsOneWidget);
           expect(
             find.byKey(const ValueKey('rating-disabled-cta')),
             findsNothing,
@@ -411,6 +415,77 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+  });
+
+  group('pagos digitales (YAPE/PLIN)', () {
+    for (final method in const ['YAPE', 'PLIN']) {
+      testWidgets(
+        '$method + PENDING: sin estado/espera de pago y con rating habilitado',
+        (tester) async {
+          final repository = _FakeRideRepository(
+            onGetReceipt: () async => _receipt(
+              payment: _payment(method: method, status: 'PENDING'),
+            ),
+          );
+
+          await _pumpScreen(tester, repository);
+          addTearDown(() => _disposeScreen(tester));
+
+          expect(
+            find.byKey(const ValueKey('payment-waiting-message')),
+            findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('payment-status-pending')),
+            findsNothing,
+          );
+          expect(
+            find.text('Entrega el efectivo directamente a tu conductor.'),
+            findsNothing,
+          );
+          expect(find.byType(LinearProgressIndicator), findsNothing);
+
+          expect(find.text('¿Cómo estuvo tu viaje?'), findsOneWidget);
+          expect(
+            find.text(method == 'YAPE' ? 'Yape' : 'Plin'),
+            findsOneWidget,
+          );
+        },
+      );
+    }
+
+    testWidgets('YAPE: enviar calificación funciona', (tester) async {
+      final repository = _FakeRideRepository(
+        onGetReceipt: () async =>
+            _receipt(payment: _payment(method: 'YAPE', status: 'PENDING')),
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      final submitButton = find.text('Enviar calificación');
+      await tester.ensureVisible(submitButton);
+      await tester.tap(submitButton);
+      await _flushAsync(tester);
+
+      expect(repository.ratedRideId, 'ride-real');
+      expect(repository.ratedScore, 5);
+      expect(find.text('¡Gracias por calificarnos!'), findsOneWidget);
+    });
+
+    testWidgets('YAPE: no hace polling del estado de pago', (tester) async {
+      final repository = _FakeRideRepository(
+        onGetReceipt: () async =>
+            _receipt(payment: _payment(method: 'YAPE', status: 'PENDING')),
+      );
+
+      await _pumpScreen(tester, repository);
+      addTearDown(() => _disposeScreen(tester));
+
+      await tester.pump(const Duration(seconds: 4));
+
+      expect(repository.receiptRequests, 1);
+    });
   });
 }
 

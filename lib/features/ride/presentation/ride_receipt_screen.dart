@@ -126,6 +126,13 @@ class _RideReceiptScreenState
   void _configurePaymentPolling(
     RideReceipt receipt,
   ) {
+    if (receipt.payment?.method != 'CASH') {
+      _paymentTimer?.cancel();
+      _paymentTimer = null;
+
+      return;
+    }
+
     final status =
         receipt.payment?.status;
 
@@ -212,28 +219,9 @@ class _RideReceiptScreenState
         status == 'VOIDED';
   }
 
-  bool get _paymentConfirmed {
-    return _receipt?.payment?.status ==
-        'PAID';
-  }
-
   Future<void> _submitRating() async {
     if (_sendingRating ||
         _rated) {
-      return;
-    }
-
-    if (!_paymentConfirmed) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Espera a que el conductor '
-            'confirme el pago.',
-          ),
-        ),
-      );
-
       return;
     }
 
@@ -330,8 +318,13 @@ class _RideReceiptScreenState
   String _paymentMethodLabel(
     String? method,
   ) {
-    if (method == 'CASH') {
-      return 'Efectivo';
+    switch (method) {
+      case 'CASH':
+        return 'Efectivo';
+      case 'YAPE':
+        return 'Yape';
+      case 'PLIN':
+        return 'Plin';
     }
 
     return method ?? '-';
@@ -387,6 +380,9 @@ class _RideReceiptScreenState
     final payment =
         receipt.payment;
 
+    final isCash =
+        payment?.method == 'CASH';
+
     final status = payment?.status;
 
     final paymentConfirmed =
@@ -430,6 +426,7 @@ class _RideReceiptScreenState
                 CrossAxisAlignment.stretch,
             children: [
               _Header(
+                isCash: isCash,
                 paymentConfirmed:
                     paymentConfirmed,
                 totalValue: totalValue,
@@ -468,6 +465,7 @@ class _RideReceiptScreenState
                     payment?.cashReceived,
                 changeGiven:
                     payment?.changeGiven,
+                isCash: isCash,
                 paymentConfirmed:
                     paymentConfirmed,
                 isTerminal: isTerminal,
@@ -476,51 +474,43 @@ class _RideReceiptScreenState
                 status: status,
               ),
 
-              if (isPendingFlow) ...[
-                const SizedBox(height: 16),
-                const _RatingLockedCard(),
-              ],
-
-              if (paymentConfirmed) ...[
-                const SizedBox(height: 24),
-                _RatingSection(
-                  score: _score,
-                  tags: _tags,
-                  selectedTags:
-                      _selectedTags,
-                  sending: _sendingRating,
-                  rated: _rated,
-                  commentController:
-                      _commentController,
-                  onScoreChanged: (value) {
-                    setState(() {
-                      _score = value;
-                    });
-                  },
-                  onTagToggled:
-                      (key, selected) {
-                    setState(() {
-                      if (selected) {
-                        if (_selectedTags
-                                .length <
-                            5) {
-                          _selectedTags
-                              .add(key);
-                        }
-                      } else {
+              const SizedBox(height: 24),
+              _RatingSection(
+                score: _score,
+                tags: _tags,
+                selectedTags:
+                    _selectedTags,
+                sending: _sendingRating,
+                rated: _rated,
+                commentController:
+                    _commentController,
+                onScoreChanged: (value) {
+                  setState(() {
+                    _score = value;
+                  });
+                },
+                onTagToggled:
+                    (key, selected) {
+                  setState(() {
+                    if (selected) {
+                      if (_selectedTags
+                              .length <
+                          5) {
                         _selectedTags
-                            .remove(key);
+                            .add(key);
                       }
-                    });
-                  },
-                  onSubmit: _submitRating,
-                ),
-              ],
+                    } else {
+                      _selectedTags
+                          .remove(key);
+                    }
+                  });
+                },
+                onSubmit: _submitRating,
+              ),
 
               const SizedBox(height: 24),
 
-              if (paymentConfirmed &&
-                  _rated)
+              if (_rated)
                 OutlinedButton.icon(
                   key: const ValueKey(
                     'receipt-home-button',
@@ -559,10 +549,12 @@ class _RideReceiptScreenState
 
 class _Header extends StatelessWidget {
   const _Header({
+    required this.isCash,
     required this.paymentConfirmed,
     required this.totalValue,
   });
 
+  final bool isCash;
   final bool paymentConfirmed;
   final String totalValue;
 
@@ -614,9 +606,11 @@ class _Header extends StatelessWidget {
         const SizedBox(height: 24),
 
         Text(
-          paymentConfirmed
-              ? 'Total pagado'
-              : 'Total a pagar',
+          !isCash
+              ? 'Total'
+              : paymentConfirmed
+                  ? 'Total pagado'
+                  : 'Total a pagar',
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontSize: 14,
@@ -814,6 +808,7 @@ class _PaymentCard extends StatelessWidget {
     required this.totalValue,
     required this.cashReceived,
     required this.changeGiven,
+    required this.isCash,
     required this.paymentConfirmed,
     required this.isTerminal,
     required this.isPendingFlow,
@@ -824,6 +819,7 @@ class _PaymentCard extends StatelessWidget {
   final String totalValue;
   final String? cashReceived;
   final String? changeGiven;
+  final bool isCash;
   final bool paymentConfirmed;
   final bool isTerminal;
   final bool isPendingFlow;
@@ -868,14 +864,16 @@ class _PaymentCard extends StatelessWidget {
                 ),
               ),
 
-              const Spacer(),
+              if (isCash) ...[
+                const Spacer(),
 
-              _StatusPill(
-                paymentConfirmed:
-                    paymentConfirmed,
-                isTerminal: isTerminal,
-                status: status,
-              ),
+                _StatusPill(
+                  paymentConfirmed:
+                      paymentConfirmed,
+                  isTerminal: isTerminal,
+                  status: status,
+                ),
+              ],
             ],
           ),
 
@@ -912,7 +910,7 @@ class _PaymentCard extends StatelessWidget {
               value: 'S/ $changeGiven',
             ),
 
-          if (isPendingFlow) ...[
+          if (isCash && isPendingFlow) ...[
             const SizedBox(height: 14),
 
             const Divider(
@@ -957,7 +955,7 @@ class _PaymentCard extends StatelessWidget {
             ),
           ],
 
-          if (isTerminal) ...[
+          if (isCash && isTerminal) ...[
             const SizedBox(height: 14),
 
             const Divider(
@@ -1080,76 +1078,6 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-class _RatingLockedCard extends StatelessWidget {
-  const _RatingLockedCard();
-
-  static const Color _darkGreen = Color(0xFF123B26);
-  static const Color _secondaryCream = Color(0xFFFBF7EA);
-  static const Color _border = Color(0xFFE7E0CB);
-  static const Color _secondaryText = Color(0xFF6F7E72);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _secondaryCream,
-        borderRadius:
-            BorderRadius.circular(16),
-        border: Border.all(color: _border),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          const Icon(
-            Icons.star_border,
-            size: 40,
-            color: _secondaryText,
-          ),
-
-          const SizedBox(height: 10),
-
-          const Text(
-            'Calificar viaje',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-              color: _darkGreen,
-            ),
-          ),
-
-          const SizedBox(height: 6),
-
-          const Text(
-            'Podrás calificar tu viaje '
-            'cuando el conductor confirme '
-            'el pago.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              color: _secondaryText,
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
-          OutlinedButton.icon(
-            key: const ValueKey(
-              'rating-disabled-cta',
-            ),
-            onPressed: null,
-            icon: const Icon(
-              Icons.star_border,
-            ),
-            label: const Text(
-              'Calificar viaje',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _RatingSection extends StatelessWidget {
   const _RatingSection({
     required this.score,
@@ -1205,35 +1133,38 @@ class _RatingSection extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          Row(
-            mainAxisAlignment:
-                MainAxisAlignment.center,
-            children: List.generate(
-              5,
-              (index) {
-                final value = index + 1;
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisAlignment:
+                  MainAxisAlignment.center,
+              children: List.generate(
+                5,
+                (index) {
+                  final value = index + 1;
 
-                return IconButton(
-                  onPressed: rated
-                      ? null
-                      : () => onScoreChanged(
-                            value,
-                          ),
-                  iconSize: 40,
-                  disabledColor:
+                  return IconButton(
+                    onPressed: rated
+                        ? null
+                        : () => onScoreChanged(
+                              value,
+                            ),
+                    iconSize: 40,
+                    disabledColor:
+                        value <= score
+                            ? _ctaYellow
+                            : _border,
+                    color: value <= score
+                        ? _ctaYellow
+                        : _border,
+                    icon: Icon(
                       value <= score
-                          ? _ctaYellow
-                          : _border,
-                  color: value <= score
-                      ? _ctaYellow
-                      : _border,
-                  icon: Icon(
-                    value <= score
-                        ? Icons.star
-                        : Icons.star_border,
-                  ),
-                );
-              },
+                          ? Icons.star
+                          : Icons.star_border,
+                    ),
+                  );
+                },
+              ),
             ),
           ),
 
