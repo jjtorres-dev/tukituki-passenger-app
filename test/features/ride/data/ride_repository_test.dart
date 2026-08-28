@@ -3,6 +3,48 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:passenger/features/ride/data/ride_repository.dart';
 
 void main() {
+  test('createRide manda POST a passenger/rides con el paymentMethod recibido', () async {
+    late RequestOptions capturedRequest;
+    final dio = _dioReturning(
+      _cancelledRideJson(),
+      onRequest: (request) {
+        capturedRequest = request;
+      },
+    );
+
+    await RideRepository(dio).createRide(
+      fareQuoteId: 'quote-1',
+      passengerOfferFare: '8.00',
+      paymentMethod: 'YAPE',
+    );
+
+    expect(capturedRequest.method, 'POST');
+    expect(capturedRequest.path, 'passenger/rides');
+    expect(capturedRequest.data, {
+      'fareQuoteId': 'quote-1',
+      'passengerOfferFare': '8.00',
+      'paymentMethod': 'YAPE',
+    });
+  });
+
+  test('createRide ya no fuerza CASH: pasa el método tal cual (PLIN)', () async {
+    late RequestOptions capturedRequest;
+    final dio = _dioReturning(
+      _cancelledRideJson(),
+      onRequest: (request) {
+        capturedRequest = request;
+      },
+    );
+
+    await RideRepository(dio).createRide(
+      fareQuoteId: 'q',
+      passengerOfferFare: '3.00',
+      paymentMethod: 'PLIN',
+    );
+
+    expect((capturedRequest.data as Map)['paymentMethod'], 'PLIN');
+  });
+
   test('cancelRide usa PATCH, path y payload exactos', () async {
     late RequestOptions capturedRequest;
     final dio = _dioReturning(

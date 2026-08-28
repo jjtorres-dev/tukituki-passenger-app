@@ -94,6 +94,15 @@ class PassengerSpacing {
   static const double radioPildora = 30;
   static const double radioEtiquetaMarcador = 11;
 
+  /// Radio de las tarjetas de superficie amplia: el panel de precio de
+  /// la hoja de Home y la tarjeta flotante origen/destino. Agregado en
+  /// `FARE-PANEL-R1` (2026-08-27) al reescribir ambas superficies —
+  /// antes usaban literales sin intención de diseño (20 y 17
+  /// respectivamente), el mismo caso que el "radio 15" del campo de
+  /// búsqueda ya documentado. Se unifican en un solo valor. Documentado
+  /// en `sistema-de-diseno.md` §4.
+  static const double radioTarjeta = 20;
+
   /// Ningún elemento tocable mide menos de esto de lado.
   static const double tamanoTocableMinimo = 44;
 }

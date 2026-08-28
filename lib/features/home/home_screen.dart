@@ -13,12 +13,16 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../core/theme/passenger_colors.dart';
+import '../../core/theme/passenger_spacing.dart';
+import '../../core/theme/passenger_typography.dart';
 import '../../core/widgets/tuki_search_bar.dart';
 import '../auth/data/auth_repository.dart';
 import '../fare/data/fare_repository.dart';
 import '../fare/domain/fare_estimate.dart';
+import '../ride/data/payment_preference_repository.dart';
 import '../ride/data/ride_repository.dart';
 import '../ride/domain/fare_amount.dart';
+import '../ride/domain/payment_method.dart';
 import '../ride/domain/ride_history_item.dart';
 import 'domain/search_destination_result.dart';
 import 'domain/suggested_destinations.dart';
@@ -389,6 +393,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// espacio reservado.
   List<RideHistoryItem> _suggestedDestinations = const [];
 
+  /// FARE-PANEL-R1: método de pago referencial elegido por el pasajero.
+  /// Arranca en [PaymentMethod.cash] y se sobreescribe en `initState`
+  /// con el valor persistido, sin bloquear el primer frame — mismo
+  /// patrón no-bloqueante que `_resolveOriginAddress`. Se comparte con
+  /// la pantalla de confirmación (Etapa 4) a través de
+  /// `PaymentPreferenceRepository`; los dos controles nunca están
+  /// visibles a la vez, así que no hace falta un store reactivo.
+  PaymentMethod _paymentMethod = PaymentMethod.cash;
+
+  /// true en cuanto el pasajero toca el selector. Evita que la lectura
+  /// asíncrona de `initState` pise una elección que alcanzó a hacer
+  /// antes de que resolviera.
+  bool _paymentMethodTouched = false;
+
   /*
    * Puntos decodificados de la polyline
    * devuelta por Google Routes.
@@ -439,7 +457,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // Independiente del GPS: no necesita _currentPosition para pedir
     // el historial. Se dispara una sola vez por apertura de Home.
     unawaited(_loadSuggestedDestinations());
+
+    // FARE-PANEL-R1: método de pago recordado del viaje anterior.
+    unawaited(_loadPaymentMethod());
   }
+
+  Future<void> _loadPaymentMethod() async {
+    final stored = await ref.read(paymentPreferenceRepositoryProvider).read();
+
+    // Si el pasajero ya eligió algo antes de que resolviera esta
+    // lectura, su elección manda — no la pisamos con el valor viejo.
+    if (!mounted || _paymentMethodTouched) {
+      return;
+    }
+
+    setState(() {
+      _paymentMethod = stored;
+    });
+  }
+
+  Future<void> _openPaymentMethodPicker() async {
+    final selected = await showModalBottomSheet<PaymentMethod>(
+      context: context,
+      backgroundColor: PassengerColors.crema,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(PassengerSpacing.radioHojaCrema),
+        ),
+      ),
+      builder: (_) => _PaymentMethodPickerSheet(current: _paymentMethod),
+    );
+
+    if (selected == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _paymentMethodTouched = true;
+      _paymentMethod = selected;
+    });
+
+    unawaited(ref.read(paymentPreferenceRepositoryProvider).write(selected));
+  }
+
+  IconData _paymentMethodIcon(PaymentMethod method) => switch (method) {
+    PaymentMethod.cash => Icons.payments,
+    PaymentMethod.yape => Icons.smartphone,
+    PaymentMethod.plin => Icons.qr_code_2,
+  };
 
   @override
   void didChangeDependencies() {
@@ -1492,6 +1557,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           .createRide(
             fareQuoteId: quote.quoteId,
             passengerOfferFare: normalizedPassengerOffer,
+            paymentMethod: _paymentMethod.wireValue,
           );
 
       if (!mounted) {
@@ -2682,33 +2748,164 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
           child: SizedBox(
+            // El alto interno del footer se mantiene en 54 pese al
+            // ícono de pago a la izquierda — la estimación
+            // `constraints.maxHeight - _topOverlayHeight - 54` de
+            // `_buildSheet` depende de ese número (HOME-LAYOUT-R1).
             height: 54,
-            // G4B-R5: "Ofrecer y buscar conductor" no lleva
-            // icono — únicamente ese estado (ctaIcon null y sin
-            // progreso) usa un FilledButton sin `.icon`.
-            child: !ctaShowsProgress && ctaIcon == null
-                ? FilledButton(
-                    onPressed: ctaOnPressed,
-                    style: ctaButtonStyle,
-                    child: Text(ctaLabel),
-                  )
-                : FilledButton.icon(
-                    onPressed: ctaOnPressed,
-                    style: ctaButtonStyle,
-                    icon: ctaShowsProgress
-                        ? const SizedBox(
-                            width: 19,
-                            height: 19,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: PassengerColors.verdeMarca,
-                            ),
+            child: Row(
+              children: [
+                // FARE-PANEL-R1: método de pago referencial, a la
+                // izquierda del CTA como en InDriver. Lee/escribe el
+                // mismo valor que el selector de la pantalla de
+                // confirmación (Etapa 4), vía
+                // `PaymentPreferenceRepository`.
+                _buildPaymentMethodButton(),
+                const SizedBox(width: PassengerSpacing.espacioIndicadorPasos),
+                Expanded(
+                  child: SizedBox(
+                    height: 54,
+                    // G4B-R5: "Encontrar ofertas" no lleva icono —
+                    // únicamente ese estado (ctaIcon null y sin
+                    // progreso) usa un FilledButton sin `.icon`.
+                    child: !ctaShowsProgress && ctaIcon == null
+                        ? FilledButton(
+                            onPressed: ctaOnPressed,
+                            style: ctaButtonStyle,
+                            child: Text(ctaLabel),
                           )
-                        : Icon(ctaIcon),
-                    label: Text(ctaLabel),
+                        : FilledButton.icon(
+                            onPressed: ctaOnPressed,
+                            style: ctaButtonStyle,
+                            icon: ctaShowsProgress
+                                ? const SizedBox(
+                                    width: 19,
+                                    height: 19,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: PassengerColors.verdeMarca,
+                                    ),
+                                  )
+                                : Icon(ctaIcon),
+                            label: Text(ctaLabel),
+                          ),
                   ),
+                ),
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// FARE-PANEL-R1: botón del método de pago (ícono, sin texto), a la
+  /// izquierda del CTA. Abre `_openPaymentMethodPicker`. Se deshabilita
+  /// mientras se está pidiendo el viaje — cambiar el método a esa
+  /// altura no tendría efecto.
+  Widget _buildPaymentMethodButton() {
+    return IconButton(
+      key: const ValueKey('payment-method-button'),
+      tooltip: 'Método de pago: ${_paymentMethod.label}',
+      onPressed: _requestingRide ? null : _openPaymentMethodPicker,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(
+        width: PassengerSpacing.tamanoTocableMinimo,
+        height: PassengerSpacing.tamanoTocableMinimo,
+      ),
+      color: PassengerColors.verdeMarca,
+      disabledColor: PassengerColors.textoBotonInactivo,
+      icon: Icon(_paymentMethodIcon(_paymentMethod), size: 24),
+    );
+  }
+}
+
+/// Hoja del selector de método de pago de Home (`FARE-PANEL-R1`).
+/// Devuelve el [PaymentMethod] elegido vía `Navigator.pop`, o `null` si
+/// se cierra sin elegir. Solo Efectivo/Yape/Plin — `CARD` no se ofrece
+/// (ver `PaymentMethod`).
+class _PaymentMethodPickerSheet extends StatelessWidget {
+  const _PaymentMethodPickerSheet({required this.current});
+
+  final PaymentMethod current;
+
+  IconData _iconFor(PaymentMethod method) => switch (method) {
+    PaymentMethod.cash => Icons.payments,
+    PaymentMethod.yape => Icons.smartphone,
+    PaymentMethod.plin => Icons.qr_code_2,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              width: 42,
+              height: 4,
+              decoration: BoxDecoration(
+                color: PassengerColors.bordeSuave,
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              PassengerSpacing.margenLateralPantalla,
+              16,
+              PassengerSpacing.margenLateralPantalla,
+              4,
+            ),
+            child: Text(
+              '¿Cómo vas a pagar?',
+              style: PassengerTypography.tituloSeccion.copyWith(
+                color: PassengerColors.textoPrimario,
+              ),
+            ),
+          ),
+          for (final method in PaymentMethod.values)
+            InkWell(
+              key: ValueKey('payment-option-${method.name}'),
+              onTap: () => Navigator.pop(context, method),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: PassengerSpacing.margenLateralPantalla,
+                  vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _iconFor(method),
+                      size: 24,
+                      color: PassengerColors.textoPrimario,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        method.label,
+                        style: PassengerTypography.cuerpo.copyWith(
+                          color: PassengerColors.textoPrimario,
+                        ),
+                      ),
+                    ),
+                    if (method == current)
+                      const Icon(
+                        Icons.check,
+                        size: 22,
+                        color: PassengerColors.acento,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
   }

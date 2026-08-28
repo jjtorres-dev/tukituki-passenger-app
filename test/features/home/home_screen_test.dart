@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -16,8 +17,10 @@ import 'package:passenger/features/home/home_screen.dart';
 import 'package:passenger/features/places/data/places_repository.dart';
 import 'package:passenger/features/places/domain/place_details.dart';
 import 'package:passenger/features/places/domain/place_prediction.dart';
+import 'package:passenger/features/ride/data/payment_preference_repository.dart';
 import 'package:passenger/features/ride/data/ride_repository.dart';
 import 'package:passenger/features/ride/domain/passenger_ride.dart';
+import 'package:passenger/features/ride/domain/payment_method.dart';
 import 'package:passenger/features/ride/domain/ride_history_item.dart';
 
 void main() {
@@ -1328,6 +1331,177 @@ void main() {
       );
     });
   });
+
+  group('FARE-PANEL-R1 — método de pago', () {
+    final buttonFinder = find.byKey(const ValueKey('payment-method-button'));
+
+    testWidgets(
+      'con destino, el botón de método de pago aparece y muestra Efectivo por '
+      'defecto; sin destino no existe',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+        );
+
+        expect(buttonFinder, findsNothing);
+
+        await _selectDestinationOnMap(tester);
+
+        expect(buttonFinder, findsOneWidget);
+        expect(
+          find.descendant(of: buttonFinder, matching: find.byIcon(Icons.payments)),
+          findsOneWidget,
+        );
+        expect(
+          tester.widget<IconButton>(buttonFinder).tooltip,
+          'Método de pago: Efectivo',
+        );
+      },
+    );
+
+    testWidgets(
+      'el selector ofrece exactamente Efectivo, Yape y Plin — nunca Tarjeta',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+        );
+        await _selectDestinationOnMap(tester);
+
+        await tester.tap(buttonFinder);
+        await tester.pumpAndSettle();
+
+        expect(find.text('¿Cómo vas a pagar?'), findsOneWidget);
+        expect(find.byKey(const ValueKey('payment-option-cash')), findsOneWidget);
+        expect(find.byKey(const ValueKey('payment-option-yape')), findsOneWidget);
+        expect(find.byKey(const ValueKey('payment-option-plin')), findsOneWidget);
+        expect(find.text('Efectivo'), findsOneWidget);
+        expect(find.text('Yape'), findsOneWidget);
+        expect(find.text('Plin'), findsOneWidget);
+        expect(find.textContaining('Tarjeta'), findsNothing);
+        expect(find.textContaining('CARD'), findsNothing);
+
+        // La opción activa (cash) lleva el check.
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('payment-option-cash')),
+            matching: find.byIcon(Icons.check),
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets('elegir Yape cambia el ícono del botón y lo persiste', (
+      tester,
+    ) async {
+      final paymentRepo = _FakePaymentPreferenceRepository();
+
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: _FakeRideRepository(),
+        paymentPreferenceRepository: paymentRepo,
+      );
+      await _selectDestinationOnMap(tester);
+
+      await tester.tap(buttonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('payment-option-yape')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(of: buttonFinder, matching: find.byIcon(Icons.smartphone)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: buttonFinder, matching: find.byIcon(Icons.payments)),
+        findsNothing,
+      );
+      expect(paymentRepo.writes, [PaymentMethod.yape]);
+    });
+
+    testWidgets(
+      'el método persistido del viaje anterior se restaura al abrir Home',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          paymentPreferenceRepository: _FakePaymentPreferenceRepository(
+            PaymentMethod.plin,
+          ),
+        );
+        await _selectDestinationOnMap(tester);
+
+        expect(
+          find.descendant(
+            of: buttonFinder,
+            matching: find.byIcon(Icons.qr_code_2),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester.widget<IconButton>(buttonFinder).tooltip,
+          'Método de pago: Plin',
+        );
+      },
+    );
+
+    testWidgets('createRide recibe el wireValue del método elegido', (
+      tester,
+    ) async {
+      final rideRepository = _FakeRideRepository();
+      final paymentRepo = _FakePaymentPreferenceRepository();
+
+      await _pumpRoutedHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: rideRepository,
+        paymentPreferenceRepository: paymentRepo,
+      );
+
+      await _selectDestinationOnMap(tester);
+
+      await tester.tap(buttonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('payment-option-yape')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(_offerFieldFinder, '8.00');
+      await tester.pump();
+
+      await tester.tap(find.byType(FilledButton));
+      await _flushAsync(tester);
+
+      expect(rideRepository.createRidePaymentMethods, ['YAPE']);
+      expect(paymentRepo.writes, [PaymentMethod.yape]);
+    });
+
+    testWidgets('sin tocar el selector, createRide manda CASH (default)', (
+      tester,
+    ) async {
+      final rideRepository = _FakeRideRepository();
+
+      await _pumpRoutedHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: rideRepository,
+      );
+
+      await _selectDestinationOnMap(tester);
+      await tester.enterText(_offerFieldFinder, '8.00');
+      await tester.pump();
+
+      await tester.tap(find.byType(FilledButton));
+      await _flushAsync(tester);
+
+      expect(rideRepository.createRidePaymentMethods, ['CASH']);
+    });
+  });
 }
 
 final _offerFieldFinder = find.byKey(const ValueKey('passenger-offer-field'));
@@ -1393,6 +1567,7 @@ Future<void> _pumpHomeScreen(
   required FareRepository fareRepository,
   required RideRepository rideRepository,
   PlacesRepository? placesRepository,
+  PaymentPreferenceRepository? paymentPreferenceRepository,
   List<Position>? locationSequence,
   _FakeGeolocatorPlatform? geolocatorPlatform,
   MediaQueryData? mediaQueryData,
@@ -1406,6 +1581,9 @@ Future<void> _pumpHomeScreen(
       overrides: [
         fareRepositoryProvider.overrideWithValue(fareRepository),
         rideRepositoryProvider.overrideWithValue(rideRepository),
+        paymentPreferenceRepositoryProvider.overrideWithValue(
+          paymentPreferenceRepository ?? _FakePaymentPreferenceRepository(),
+        ),
         if (placesRepository != null)
           placesRepositoryProvider.overrideWithValue(placesRepository),
       ],
@@ -1424,6 +1602,7 @@ Future<void> _pumpRoutedHomeScreen(
   WidgetTester tester, {
   required FareRepository fareRepository,
   required RideRepository rideRepository,
+  PaymentPreferenceRepository? paymentPreferenceRepository,
 }) async {
   GeolocatorPlatform.instance = _FakeGeolocatorPlatform();
 
@@ -1444,6 +1623,9 @@ Future<void> _pumpRoutedHomeScreen(
       overrides: [
         fareRepositoryProvider.overrideWithValue(fareRepository),
         rideRepositoryProvider.overrideWithValue(rideRepository),
+        paymentPreferenceRepositoryProvider.overrideWithValue(
+          paymentPreferenceRepository ?? _FakePaymentPreferenceRepository(),
+        ),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
@@ -1710,10 +1892,28 @@ class _FakeFareRepository extends FareRepository {
   }
 }
 
+class _FakePaymentPreferenceRepository extends PaymentPreferenceRepository {
+  _FakePaymentPreferenceRepository([this._method = PaymentMethod.cash])
+    : super(const FlutterSecureStorage());
+
+  PaymentMethod _method;
+  final List<PaymentMethod> writes = [];
+
+  @override
+  Future<PaymentMethod> read() async => _method;
+
+  @override
+  Future<void> write(PaymentMethod method) async {
+    _method = method;
+    writes.add(method);
+  }
+}
+
 class _FakeRideRepository extends RideRepository {
   _FakeRideRepository({this.history = const []}) : super(Dio());
 
   final List<String> createRideCalls = [];
+  final List<String> createRidePaymentMethods = [];
 
   /// SUGGESTED-DESTINATIONS-R1: vacío por defecto — ningún test
   /// existente ve sugerencias a menos que las pida explícitamente.
@@ -1733,8 +1933,10 @@ class _FakeRideRepository extends RideRepository {
   Future<PassengerRide> createRide({
     required String fareQuoteId,
     required String passengerOfferFare,
+    required String paymentMethod,
   }) async {
     createRideCalls.add(passengerOfferFare);
+    createRidePaymentMethods.add(paymentMethod);
 
     return _ride(id: 'ride-created', passengerOfferFare: passengerOfferFare);
   }

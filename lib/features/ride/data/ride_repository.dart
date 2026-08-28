@@ -21,13 +21,16 @@ class RideRepository {
   Future<PassengerRide> createRide({
     required String fareQuoteId,
     required String passengerOfferFare,
+    required String paymentMethod,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       'passenger/rides',
       data: {
         'fareQuoteId': fareQuoteId,
         'passengerOfferFare': passengerOfferFare,
-        'paymentMethod': 'CASH',
+        // FARE-PANEL-R1: ya no es 'CASH' fijo — lo elige el pasajero
+        // (Efectivo/Yape/Plin) y se recuerda entre viajes.
+        'paymentMethod': paymentMethod,
       },
     );
 
