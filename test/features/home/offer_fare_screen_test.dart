@@ -5,9 +5,8 @@ import 'package:passenger/features/home/offer_fare_screen.dart';
 import 'package:passenger/features/ride/domain/payment_method.dart';
 
 void main() {
-  const originAddress = 'Jr. Lima 123, Tarapoto';
+  const originAddress = 'Jr. Lima 123';
   const destinationName = 'Plaza de Armas';
-  const destinationAddress = 'Jr. San Martín 100, Tarapoto';
 
   /// Mismo motivo que `search_destination_screen_test.dart`: el
   /// `Future` de `Navigator.push` recién se completa cuando la
@@ -36,7 +35,6 @@ void main() {
                       paymentMethod: paymentMethod,
                       originAddress: originAddress,
                       destinationName: destinationName,
-                      destinationAddress: destinationAddress,
                     ),
                   ),
                 );
@@ -76,7 +74,6 @@ void main() {
       expect(shownAmount(tester), '3.50');
       expect(find.text(originAddress), findsOneWidget);
       expect(find.text(destinationName), findsOneWidget);
-      expect(find.text(destinationAddress), findsOneWidget);
       expect(find.text('Yape'), findsOneWidget);
     },
   );

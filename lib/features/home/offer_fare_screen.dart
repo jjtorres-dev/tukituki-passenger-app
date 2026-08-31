@@ -30,7 +30,6 @@ class OfferFareScreen extends StatefulWidget {
     required this.paymentMethod,
     required this.originAddress,
     required this.destinationName,
-    required this.destinationAddress,
   });
 
   /// Monto actual del stepper de Home, en centavos.
@@ -38,9 +37,11 @@ class OfferFareScreen extends StatefulWidget {
 
   final PaymentMethod paymentMethod;
 
+  /// Ya resueltos a un nombre corto por Home (`shortAddressLabel`)
+  /// antes de construir esta pantalla — `FARE-PANEL-R1` etapa 5. Esta
+  /// pantalla no vuelve a acortarlos, solo los muestra.
   final String originAddress;
   final String destinationName;
-  final String? destinationAddress;
 
   @override
   State<OfferFareScreen> createState() => _OfferFareScreenState();
@@ -257,7 +258,7 @@ class _OfferFareScreenState extends State<OfferFareScreen> {
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
-                  Icons.my_location,
+                  Icons.person,
                   color: PassengerColors.blanco,
                   size: 12,
                 ),
@@ -309,7 +310,7 @@ class _OfferFareScreenState extends State<OfferFareScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Icon(
-                Icons.location_on,
+                Icons.flag,
                 color: PassengerColors.destino,
                 size: 22,
               ),
@@ -334,17 +335,6 @@ class _OfferFareScreenState extends State<OfferFareScreen> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (widget.destinationAddress != null &&
-                        widget.destinationAddress!.trim().isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.destinationAddress!,
-                        style: const TextStyle(
-                          color: PassengerColors.textoSecundario,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),

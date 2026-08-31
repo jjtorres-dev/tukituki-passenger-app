@@ -27,6 +27,7 @@ import '../ride/domain/ride_history_item.dart';
 import '../ride/presentation/payment_method_picker_sheet.dart';
 import 'domain/offer_fare_result.dart';
 import 'domain/search_destination_result.dart';
+import 'domain/short_address_label.dart';
 import 'domain/suggested_destinations.dart';
 import 'offer_fare_screen.dart';
 import 'search_destination_screen.dart';
@@ -558,9 +559,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         builder: (_) => OfferFareScreen(
           offerCents: _offerCents,
           paymentMethod: _paymentMethod,
-          originAddress: _originAddressLabel(_quote, _currentPosition),
+          originAddress: shortAddressLabel(
+            _originAddressLabel(_quote, _currentPosition),
+          ),
           destinationName: _selectedDestinationName ?? 'Destino',
-          destinationAddress: _selectedDestinationAddress,
         ),
       ),
     );
@@ -1240,7 +1242,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     setState(() {
       _selectedDestination = destination;
 
-      _selectedDestinationName = suggestion.destinationAddress;
+      _selectedDestinationName = shortAddressLabel(suggestion.destinationAddress);
 
       _selectedDestinationAddress = suggestion.destinationAddress;
 
@@ -1524,7 +1526,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _routePoints = routePoints;
 
         if (destinationAddressResolved) {
-          _selectedDestinationName = resolvedDestinationAddress;
+          _selectedDestinationName = shortAddressLabel(resolvedDestinationAddress);
           _selectedDestinationAddress = null;
         }
       });
@@ -2158,53 +2160,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return position == null ? 'Esperando GPS...' : 'Tu ubicación actual';
   }
 
-  /// HOME-LAYOUT-R1: versión corta de [_originAddressLabel], SOLO para
-  /// la etiqueta del marcador flotante (la tarjeta origen/destino de
-  /// la hoja sigue mostrando la dirección completa).
-  ///
-  /// Heurística — nos quedamos con lo que hay antes de la primera
-  /// coma. Es frágil a propósito documentada, no una solución robusta:
-  /// depende de que el backend siga devolviendo
-  /// `"calle y número, distrito/ciudad, código postal, país"` (el
-  /// formato de `formatted_address` de Google Geocoding para
-  /// direcciones de Perú). Investigado (2026-08-25): el backend hoy
-  /// SOLO expone ese string completo — el tipo `GoogleGeocodingResponse`
-  /// de `google-geocoding.service.ts` (tukituki-backend) descarta el
-  /// array `address_components` que Google sí devuelve (con
-  /// `street_number`/`route` ya separados), y no hay ningún campo
-  /// corto en `OriginAddressResponseDto` ni en
-  /// `FareQuoteLocationResponseDto`. Agregar ese campo en el backend es
-  /// la solución correcta a futuro (ver `App-passenger/decisiones.md`
-  /// para el detalle del costo estimado) — fuera de alcance de esta
-  /// tarea, que es solo el layout de esta pantalla.
-  ///
-  /// Formatos que esta heurística rompe hoy: cualquier dirección sin
-  /// coma (la deja tal cual, sin acortar — ver el `commaIndex <= 0` de
-  /// abajo); una dirección donde la calle/número en sí contenga una
-  /// coma antes del punto que el usuario esperaría cortar (p. ej. un
-  /// interior/departamento tipo `"Jr. Lima 250, Int. 4, Tarapoto..."`
-  /// se corta en `"Jr. Lima 250"`, que en este caso sí es lo deseado,
-  /// pero no hay garantía de que Google mantenga siempre esa forma); y
-  /// direcciones fuera de Perú con otro orden de componentes (esta app
-  /// no opera fuera de Tarapoto hoy, así que no es un caso real todavía).
-  String _shortAddressLabel(String address) {
-    final trimmed = address.trim();
-    final commaIndex = trimmed.indexOf(',');
-
-    if (commaIndex <= 0) {
-      return trimmed;
-    }
-
-    return trimmed.substring(0, commaIndex).trim();
-  }
-
   /// Etiqueta del marcador propio del origen. El ícono ya NO es parte
   /// de este widget — es el `Marker` real que agrega [_markers]; este
   /// método solo dibuja la píldora con la dirección y la punta
   /// triangular que la conecta visualmente con ese `Marker` (ver el
   /// comentario sobre la proyección de la etiqueta en `build()`).
   Widget _buildOriginMarkerLabel(FareEstimate? quote, Position? position) {
-    final address = _shortAddressLabel(_originAddressLabel(quote, position));
+    final address = shortAddressLabel(_originAddressLabel(quote, position));
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2695,7 +2657,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
-                  Icons.my_location,
+                  Icons.person,
                   color: PassengerColors.blanco,
                   size: 12,
                 ),
@@ -2715,7 +2677,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      _originAddressLabel(quote, position),
+                      shortAddressLabel(_originAddressLabel(quote, position)),
                       style: const TextStyle(
                         color: PassengerColors.textoPrimario,
                         fontWeight: FontWeight.w700,
@@ -2747,7 +2709,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Icon(
-                Icons.location_on,
+                Icons.flag,
                 color: PassengerColors.destino,
                 size: 22,
               ),
@@ -2774,18 +2736,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (destination != null &&
-                        _selectedDestinationAddress != null &&
-                        _selectedDestinationAddress!.trim().isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        _selectedDestinationAddress!,
-                        style: const TextStyle(
-                          color: PassengerColors.textoSecundario,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),

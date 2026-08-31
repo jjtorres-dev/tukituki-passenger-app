@@ -465,9 +465,13 @@ void main() {
 
       await _selectDestinationOnMap(tester);
 
+      // FARE-PANEL-R1 (Etapa 5): la tarjeta muestra el nombre corto
+      // (`shortAddressLabel`), no la dirección completa que Backend
+      // resolvió.
+      expect(find.text('Calle Yurimaguas 302'), findsOneWidget);
       expect(
         find.text('Calle Yurimaguas 302, Tarapoto 22202, Perú'),
-        findsOneWidget,
+        findsNothing,
       );
       expect(find.text('Destino seleccionado en el mapa'), findsNothing);
       expect(find.text('Destino en el mapa'), findsNothing);
@@ -546,10 +550,14 @@ void main() {
       expect(fareRepository.callCount, 1);
       // Backend hace eco de la dirección real que ya mandó el cliente
       // (autocomplete nunca deja el placeholder puesto, así que nunca
-      // se re-geocodifica) — sigue mostrándose intacta.
+      // se re-geocodifica). FARE-PANEL-R1 (Etapa 5): la tarjeta ya no
+      // muestra esa dirección completa como subtítulo — el nombre
+      // corto real de la búsqueda (`primaryText`) sigue intacto como
+      // único texto.
+      expect(find.text('Municipalidad de Tarapoto'), findsOneWidget);
       expect(
         find.text('Jr. Jiménez Pimentel 210, Tarapoto 22202, Perú'),
-        findsOneWidget,
+        findsNothing,
       );
       expect(_offerAmountFinder, findsOneWidget);
     },
@@ -927,9 +935,15 @@ void main() {
         'la respuesta tardía vuelve a medir el overlay superior', (
       tester,
     ) async {
+      // FARE-PANEL-R1 (Etapa 5): sin coma a propósito -- `shortAddressLabel`
+      // es no-op sobre una dirección sin coma, así que este fixture
+      // sigue provocando el mismo crecimiento de alto que antes de esa
+      // etapa (con coma, quedaría recortado a un nombre corto de una
+      // sola línea y ya no ejercitaría el remedido tardío que prueba
+      // este test).
       const longOriginAddress =
-          'Avenida Circunvalación 1845, referencia frente al mercado de '
-          'productores del barrio Partido Alto, Tarapoto, San Martín, Perú';
+          'Avenida Circunvalación 1845 referencia frente al mercado de '
+          'productores del barrio Partido Alto Tarapoto San Martín Perú';
       final fareRepository = _FakeFareRepository(
         estimatedFare: '7.00',
         originAddress: longOriginAddress,
@@ -1279,6 +1293,51 @@ void main() {
         findsNothing,
       );
     });
+
+    testWidgets(
+      'FARE-PANEL-R1 (Etapa 5): tocar una sugerencia con coma en la '
+      'dirección muestra el nombre corto en la tarjeta una sola vez, sin '
+      'duplicado',
+      (tester) async {
+        const fullAddress =
+            'Universidad Peruana Unión, Km. 19 Carretera Fernando '
+            'Belaunde Terry';
+        const shortName = 'Universidad Peruana Unión';
+
+        final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+        final rideRepository = _FakeRideRepository(
+          history: [
+            _historyItem(
+              rideId: 'r1',
+              destinationAddress: fullAddress,
+              requestedAt: DateTime(2026, 8, 24),
+            ),
+          ],
+        );
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+
+        // La fila de sugerencia muestra la dirección completa tal cual
+        // llega del historial -- el recorte es propio de la tarjeta,
+        // no de la lista de sugerencias.
+        expect(find.text(fullAddress), findsOneWidget);
+
+        await tester.tap(find.text(fullAddress));
+        await _flushAsync(tester);
+
+        // Antes del bug fix, `_selectedDestinationName` y
+        // `_selectedDestinationAddress` quedaban con la misma cadena
+        // completa -- la tarjeta la mostraba dos veces (título y
+        // subtítulo). Ahora la tarjeta muestra solo el nombre corto,
+        // una única vez.
+        expect(find.text(shortName), findsOneWidget);
+        expect(find.text(fullAddress), findsNothing);
+      },
+    );
   });
 
   group('FARE-PANEL-R1 — método de pago', () {
