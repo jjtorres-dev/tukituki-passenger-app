@@ -24,8 +24,11 @@ import '../ride/data/ride_repository.dart';
 import '../ride/domain/fare_amount.dart';
 import '../ride/domain/payment_method.dart';
 import '../ride/domain/ride_history_item.dart';
+import '../ride/presentation/payment_method_picker_sheet.dart';
+import 'domain/offer_fare_result.dart';
 import 'domain/search_destination_result.dart';
 import 'domain/suggested_destinations.dart';
+import 'offer_fare_screen.dart';
 import 'search_destination_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -493,7 +496,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           top: Radius.circular(PassengerSpacing.radioHojaCrema),
         ),
       ),
-      builder: (_) => _PaymentMethodPickerSheet(current: _paymentMethod),
+      builder: (_) => PaymentMethodPickerSheet(current: _paymentMethod),
     );
 
     if (selected == null || !mounted) {
@@ -541,15 +544,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
-  /// FARE-PANEL-R1 (Etapa 2): gancho compartido hacia la futura
-  /// pantalla "Ofrece tu tarifa" (Etapa 4), que todavía no existe. Lo
-  /// llaman el tap sobre la cifra del stepper y el lápiz de la fila
-  /// "Mototaxi". Sin acción visible todavía — la Etapa 4 rellena el
-  /// cuerpo sin volver a tocar estos dos puntos de entrada.
-  void _openOfferFareScreen() {
-    // TODO(FARE-PANEL-R1 Etapa 4): Navigator.push(...
-    //   OfferFareScreen(offerCents: _offerCents, ...))
-    debugPrint('FARE-PANEL-R1: _openOfferFareScreen (Etapa 4 pendiente)');
+  /// FARE-PANEL-R1 (Etapa 4): abre "Ofrece tu tarifa" — gancho
+  /// compartido por el tap sobre la cifra del stepper y el lápiz de la
+  /// fila "Mototaxi". La pantalla nunca llama a `createRide`: solo
+  /// devuelve el monto/método de pago finales por `pop`. Si vuelve
+  /// `null` (back sin confirmar), Home no cambia nada. Si vuelve un
+  /// resultado, Home actualiza su propio estado y llama a
+  /// `_requestRide()` tal cual ya hace con los valores del stepper —
+  /// mismo manejo de errores y de cotización vencida, sin duplicarlo.
+  Future<void> _openOfferFareScreen() async {
+    final result = await Navigator.of(context).push<OfferFareResult>(
+      MaterialPageRoute(
+        builder: (_) => OfferFareScreen(
+          offerCents: _offerCents,
+          paymentMethod: _paymentMethod,
+          originAddress: _originAddressLabel(_quote, _currentPosition),
+          destinationName: _selectedDestinationName ?? 'Destino',
+          destinationAddress: _selectedDestinationAddress,
+        ),
+      ),
+    );
+
+    if (result == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _offerCents = result.offerCents;
+      _paymentMethod = result.paymentMethod;
+      _paymentMethodTouched = true;
+    });
+
+    unawaited(
+      ref.read(paymentPreferenceRepositoryProvider).write(result.paymentMethod),
+    );
+
+    await _requestRide();
   }
 
   Future<void> _openMototaxiInfo() async {
@@ -2874,99 +2904,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// Hoja del selector de método de pago de Home (`FARE-PANEL-R1`).
-/// Devuelve el [PaymentMethod] elegido vía `Navigator.pop`, o `null` si
-/// se cierra sin elegir. Solo Efectivo/Yape/Plin — `CARD` no se ofrece
-/// (ver `PaymentMethod`).
-class _PaymentMethodPickerSheet extends StatelessWidget {
-  const _PaymentMethodPickerSheet({required this.current});
-
-  final PaymentMethod current;
-
-  IconData _iconFor(PaymentMethod method) => switch (method) {
-    PaymentMethod.cash => Icons.payments,
-    PaymentMethod.yape => Icons.smartphone,
-    PaymentMethod.plin => Icons.qr_code_2,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(height: 12),
-          Center(
-            child: Container(
-              width: 42,
-              height: 4,
-              decoration: BoxDecoration(
-                color: PassengerColors.bordeSuave,
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              PassengerSpacing.margenLateralPantalla,
-              16,
-              PassengerSpacing.margenLateralPantalla,
-              4,
-            ),
-            child: Text(
-              '¿Cómo vas a pagar?',
-              style: PassengerTypography.tituloSeccion.copyWith(
-                color: PassengerColors.textoPrimario,
-              ),
-            ),
-          ),
-          for (final method in PaymentMethod.values)
-            InkWell(
-              key: ValueKey('payment-option-${method.name}'),
-              onTap: () => Navigator.pop(context, method),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: PassengerSpacing.margenLateralPantalla,
-                  vertical: 14,
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _iconFor(method),
-                      size: 24,
-                      color: PassengerColors.textoPrimario,
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        method.label,
-                        style: PassengerTypography.cuerpo.copyWith(
-                          color: PassengerColors.textoPrimario,
-                        ),
-                      ),
-                    ),
-                    if (method == current)
-                      const Icon(
-                        Icons.check,
-                        size: 22,
-                        color: PassengerColors.acento,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-}
-
 /// Hoja informativa de "Mototaxi" (`FARE-PANEL-R1`, Etapa 2).
 /// Puramente informativa: no navega ni devuelve valor. Mismo patrón de
-/// `showModalBottomSheet` que `_PaymentMethodPickerSheet`.
+/// `showModalBottomSheet` que `PaymentMethodPickerSheet`
+/// (`../ride/presentation/payment_method_picker_sheet.dart`).
 class _MototaxiInfoSheet extends StatelessWidget {
   const _MototaxiInfoSheet();
 

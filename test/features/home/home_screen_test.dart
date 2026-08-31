@@ -14,6 +14,7 @@ import 'package:passenger/core/widgets/tuki_search_bar.dart';
 import 'package:passenger/features/fare/data/fare_repository.dart';
 import 'package:passenger/features/fare/domain/fare_estimate.dart';
 import 'package:passenger/features/home/home_screen.dart';
+import 'package:passenger/features/home/offer_fare_screen.dart';
 import 'package:passenger/features/places/data/places_repository.dart';
 import 'package:passenger/features/places/domain/place_details.dart';
 import 'package:passenger/features/places/domain/place_prediction.dart';
@@ -1545,8 +1546,8 @@ void main() {
     });
 
     testWidgets(
-      'tocar la cifra y el lápiz de Mototaxi llaman al gancho de Etapa 4 '
-      'sin lanzar error (el método está vacío)',
+      'tocar la cifra y el lápiz de Mototaxi abren "Ofrece tu tarifa" con '
+      'el monto y método de pago actuales de Home',
       (tester) async {
         await _pumpHomeScreen(
           tester,
@@ -1554,18 +1555,136 @@ void main() {
           rideRepository: _FakeRideRepository(),
         );
         await _selectDestinationOnMap(tester);
+        await _tapOfferIncrement(tester);
+        expect(_shownOfferAmount(tester), 'S/ 3.50');
 
         await tester.tap(_offerAmountFinder);
-        await tester.pump();
-        expect(tester.takeException(), isNull);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(OfferFareScreen), findsOneWidget);
+        expect(
+          tester.widget<TextField>(_offerFareAmountField()).controller!.text,
+          '3.50',
+        );
+        expect(find.text('Efectivo'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Cerrar'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(OfferFareScreen), findsNothing);
+        expect(find.byType(HomeScreen), findsOneWidget);
 
         await tester.tap(find.byKey(const ValueKey('mototaxi-edit-button')));
-        await tester.pump();
-        expect(tester.takeException(), isNull);
+        await tester.pumpAndSettle();
 
-        // Ninguno de los dos navega ni abre una hoja.
-        expect(find.byKey(const ValueKey('mototaxi-info-sheet')), findsNothing);
-        expect(find.byType(HomeScreen), findsOneWidget);
+        expect(find.byType(OfferFareScreen), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'back en "Ofrece tu tarifa" sin confirmar no cambia nada en Home',
+      (tester) async {
+        final rideRepository = _FakeRideRepository();
+        final paymentPreferenceRepository = _FakePaymentPreferenceRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: rideRepository,
+          paymentPreferenceRepository: paymentPreferenceRepository,
+        );
+        await _selectDestinationOnMap(tester);
+
+        await tester.tap(_offerAmountFinder);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(_offerFareAmountField(), '9.00');
+        await tester.pump();
+
+        await tester.tap(find.byTooltip('Cerrar'));
+        await tester.pumpAndSettle();
+
+        expect(_shownOfferAmount(tester), 'S/ 3.00');
+        expect(rideRepository.createRideCalls, isEmpty);
+        expect(paymentPreferenceRepository.writes, isEmpty);
+      },
+    );
+
+    testWidgets(
+      'confirmar en "Ofrece tu tarifa" actualiza el monto/método de pago '
+      'en Home y pide el viaje con esos valores',
+      (tester) async {
+        final rideRepository = _FakeRideRepository();
+        final paymentPreferenceRepository = _FakePaymentPreferenceRepository();
+
+        await _pumpRoutedHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: rideRepository,
+          paymentPreferenceRepository: paymentPreferenceRepository,
+        );
+        await _selectDestinationOnMap(tester);
+
+        await tester.tap(_offerAmountFinder);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(_offerFareAmountField(), '12.00');
+        await tester.pump();
+
+        await tester.tap(
+          find.byKey(const ValueKey('offer-fare-payment-method-row')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('payment-option-yape')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(const ValueKey('offer-fare-confirm-button')),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(OfferFareScreen), findsNothing);
+        expect(rideRepository.createRideCalls, ['12.00']);
+        expect(rideRepository.createRidePaymentMethods, ['YAPE']);
+        expect(paymentPreferenceRepository.writes, [PaymentMethod.yape]);
+      },
+    );
+
+    testWidgets(
+      'si la cotización se renueva sola mientras el pasajero está en '
+      '"Ofrece tu tarifa", confirmar pide el viaje con la cotización ya '
+      'renovada',
+      (tester) async {
+        final fareRepository = _FakeFareRepository(
+          estimatedFare: '7.00',
+          firstQuoteTtl: const Duration(seconds: 2),
+        );
+        final rideRepository = _FakeRideRepository();
+
+        await _pumpRoutedHomeScreen(
+          tester,
+          fareRepository: fareRepository,
+          rideRepository: rideRepository,
+        );
+        await _selectDestinationOnMap(tester);
+        expect(fareRepository.callCount, 1);
+
+        await tester.tap(_offerAmountFinder);
+        await tester.pumpAndSettle();
+
+        // La cotización vence y se renueva sola mientras la pantalla de
+        // confirmación sigue abierta encima de Home — mismo Timer que
+        // ya cubre `G4B-R5.1-6/7`, sin código nuevo en esta pantalla.
+        await tester.pump(const Duration(seconds: 3));
+        await _flushAsync(tester);
+        expect(fareRepository.callCount, 2);
+
+        await tester.tap(
+          find.byKey(const ValueKey('offer-fare-confirm-button')),
+        );
+        await tester.pumpAndSettle();
+
+        expect(rideRepository.createRideCalls, hasLength(1));
       },
     );
 
@@ -1664,6 +1783,12 @@ final _offerIncrementFinder = find.byKey(
 final _offerDecrementFinder = find.byKey(
   const ValueKey('offer-stepper-decrement'),
 );
+
+/// FARE-PANEL-R1 (Etapa 4, reestructuración visual): el campo de monto
+/// de `OfferFareScreen` es un `TextField` propio con la key puesta
+/// directamente (ya no envuelto en `TukiTextField`).
+Finder _offerFareAmountField() =>
+    find.byKey(const ValueKey('offer-fare-amount-field'));
 
 /// Concatena los dos `Text` del stepper ("S/ " + "3.00") → "S/ 3.00".
 String _shownOfferAmount(WidgetTester tester) {
