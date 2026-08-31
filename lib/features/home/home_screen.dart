@@ -315,8 +315,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await _loadCurrentLocation();
   }
 
-  final TextEditingController _passengerOfferController =
-      TextEditingController();
+  /// FARE-PANEL-R1 (Etapa 2): oferta del pasajero en centavos enteros.
+  /// Solo se ajusta con los botones −/+ del stepper (paso
+  /// [_offerStepCents]); en esta etapa no hay entrada de texto libre.
+  /// Arranca en el mínimo y el stepper lo mantiene siempre dentro de
+  /// [_offerMinCents]‥[_offerMaxCents], así que siempre representa un
+  /// monto válido — a diferencia del `TextField` que reemplazó.
+  static const int _offerMinCents = 300;
+  static const int _offerMaxCents = 5000;
+  static const int _offerStepCents = 50;
+  int _offerCents = _offerMinCents;
 
   /// Nunca se escribe nada acá — `TukiSearchBar` de Home vacío es un
   /// disparador de navegación (`readOnly` + `onTap`), no un campo de
@@ -506,6 +514,92 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     PaymentMethod.plin => Icons.qr_code_2,
   };
 
+  /// FARE-PANEL-R1 (Etapa 2): centavos → cadena decimal "X.XX", el
+  /// mismo formato que produce `normalizePassengerOfferFare` y que
+  /// espera el backend en `passengerOfferFare`. Siempre 2 decimales.
+  String _formatCentsAsSoles(int cents) {
+    final whole = cents ~/ 100;
+    final fraction = (cents % 100).toString().padLeft(2, '0');
+    return '$whole.$fraction';
+  }
+
+  void _incrementOffer() {
+    if (_offerCents >= _offerMaxCents) {
+      return;
+    }
+    setState(() {
+      _offerCents = min(_offerMaxCents, _offerCents + _offerStepCents);
+    });
+  }
+
+  void _decrementOffer() {
+    if (_offerCents <= _offerMinCents) {
+      return;
+    }
+    setState(() {
+      _offerCents = max(_offerMinCents, _offerCents - _offerStepCents);
+    });
+  }
+
+  /// FARE-PANEL-R1 (Etapa 2): gancho compartido hacia la futura
+  /// pantalla "Ofrece tu tarifa" (Etapa 4), que todavía no existe. Lo
+  /// llaman el tap sobre la cifra del stepper y el lápiz de la fila
+  /// "Mototaxi". Sin acción visible todavía — la Etapa 4 rellena el
+  /// cuerpo sin volver a tocar estos dos puntos de entrada.
+  void _openOfferFareScreen() {
+    // TODO(FARE-PANEL-R1 Etapa 4): Navigator.push(...
+    //   OfferFareScreen(offerCents: _offerCents, ...))
+    debugPrint('FARE-PANEL-R1: _openOfferFareScreen (Etapa 4 pendiente)');
+  }
+
+  Future<void> _openMototaxiInfo() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: PassengerColors.crema,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(PassengerSpacing.radioHojaCrema),
+        ),
+      ),
+      builder: (_) => const _MototaxiInfoSheet(),
+    );
+  }
+
+  /// FARE-PANEL-R1 (Etapa 2): botón −/+ del stepper de precio. Blanco
+  /// con glifo `verdeMarca`; al llegar al límite se deshabilita
+  /// (`onPressed: null`, glifo tenue, sin ripple), no queda como "tap
+  /// muerto". Mismo patrón de `IconButton` compacto que
+  /// `_buildPaymentMethodButton`.
+  Widget _buildOfferStepperButton({
+    required Key key,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: onPressed == null
+            ? PassengerColors.inactivo
+            : PassengerColors.blanco,
+        shape: BoxShape.circle,
+      ),
+      child: IconButton(
+        key: key,
+        tooltip: tooltip,
+        onPressed: onPressed,
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(
+          width: PassengerSpacing.tamanoTocableMinimo,
+          height: PassengerSpacing.tamanoTocableMinimo,
+        ),
+        color: PassengerColors.verdeMarca,
+        disabledColor: PassengerColors.textoBotonInactivo,
+        icon: Icon(icon, size: 22),
+      ),
+    );
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -539,7 +633,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void dispose() {
     _quoteExpiryTimer?.cancel();
-    _passengerOfferController.dispose();
     _searchTriggerController.dispose();
     _mapController?.dispose();
 
@@ -556,8 +649,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// directo a `_estimateFare()` (no a `_maybeAutoEstimateFare`,
   /// cuyo guard de "ya hay quote" bloquearía justo lo que acá
   /// queremos: reemplazar una quote existente pero vencida).
-  /// `_estimateFare` nunca toca `_passengerOfferController`, así que
-  /// la oferta que el Passenger ya escribió sobrevive intacta.
+  /// `_estimateFare` nunca toca `_offerCents`, así que la oferta que
+  /// el Passenger ya ajustó con el stepper sobrevive intacta.
   void _scheduleQuoteExpiryTimer(FareEstimate quote) {
     _cancelQuoteExpiryTimer();
 
@@ -1502,48 +1595,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
-    final rawOffer = _passengerOfferController.text.trim().replaceAll(',', '.');
-
-    final passengerOffer = double.tryParse(rawOffer);
-
-    if (passengerOffer == null ||
-        !passengerOffer.isFinite ||
-        passengerOffer <= 0 ||
-        passengerOffer > 9999.99) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ingresa un monto válido para tu oferta.'),
-        ),
-      );
-
-      return;
-    }
-
-    final decimalParts = rawOffer.split('.');
-
-    if (decimalParts.length > 2 ||
-        (decimalParts.length == 2 && decimalParts[1].length > 2)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'La oferta puede tener como máximo '
-            '2 decimales.',
-          ),
-        ),
-      );
-
-      return;
-    }
-
-    final normalizedPassengerOffer = normalizePassengerOfferFare(rawOffer);
+    // FARE-PANEL-R1 (Etapa 2): la oferta viene del stepper, que
+    // mantiene `_offerCents` siempre dentro de
+    // [_offerMinCents, _offerMaxCents]. Se normaliza con el helper de
+    // siempre antes de enviarla (convención del repo), pero ya no
+    // puede ser inválida — no hay entrada de texto libre.
+    final normalizedPassengerOffer = normalizePassengerOfferFare(
+      _formatCentsAsSoles(_offerCents),
+    );
 
     if (normalizedPassengerOffer == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ingresa un monto válido para tu oferta.'),
-        ),
-      );
-
+      // Inalcanzable con el stepper; guard defensivo.
       return;
     }
 
@@ -1612,38 +1674,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return !quote.expiresAt.isAfter(DateTime.now());
   }
 
-  String _formatQuoteExpiry(DateTime expiresAt) {
-    return MaterialLocalizations.of(context).formatTimeOfDay(
-      TimeOfDay.fromDateTime(expiresAt.toLocal()),
-      alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
-    );
-  }
-
-  /// Sin ícono a propósito (`HOME-DESIGN-R1`, análisis de contraste,
-  /// 2026-08-26): el ícono decorativo que tenía antes usaba `acento`
-  /// sobre `verdeMarca`/el overlay translúcido del chip — 2.33:1 (peor
-  /// aún, 1.61:1 contra el fondo compuesto real), por debajo del
-  /// mínimo de 3:1 para elementos gráficos. El texto ya dice todo lo
-  /// que el ícono aportaba (distancia/duración), así que se quita en
-  /// vez de recolorearlo.
-  Widget _buildMetricChip({required String label}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: PassengerColors.blanco,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-
   /// SUGGESTED-DESTINATIONS-R1, formato lista vertical desde
   /// `HOME-FLOW-R1` (etapa 3) — reemplaza la pastilla horizontal
   /// original: verificado en emulador que los chips truncaban la
@@ -1707,14 +1737,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final quoteExpired = quote != null && _isQuoteExpired(quote);
 
-    final hasValidOffer =
-        normalizePassengerOfferFare(_passengerOfferController.text) != null;
-
+    // FARE-PANEL-R1 (Etapa 2): el stepper mantiene `_offerCents`
+    // siempre dentro de [_offerMinCents, _offerMaxCents], así que la
+    // oferta ya no puede ser inválida — basta con tener una cotización
+    // vigente para poder pedir el viaje.
     final canRequestRide =
         destination != null &&
         quote != null &&
         !quoteExpired &&
-        hasValidOffer &&
         !_loading &&
         !_requestingRide;
 
@@ -2060,7 +2090,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 position: position,
                                 destination: destination,
                                 quote: quote,
-                                quoteExpired: quoteExpired,
                                 ctaLabel: ctaLabel,
                                 ctaOnPressed: ctaOnPressed,
                                 ctaIcon: ctaIcon,
@@ -2280,7 +2309,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     required Position? position,
     required LatLng? destination,
     required FareEstimate? quote,
-    required bool quoteExpired,
     required String ctaLabel,
     required VoidCallback? ctaOnPressed,
     required IconData? ctaIcon,
@@ -2317,10 +2345,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
                 child: destination == null
                     ? _buildEmptySheetContent(position: position)
-                    : _buildSheetContent(
-                        quote: quote,
-                        quoteExpired: quoteExpired,
-                      ),
+                    : _buildSheetContent(quote: quote),
               ),
             ),
             // HOME-FLOW-R1 (etapa 3): sin destino no hay footer de CTA
@@ -2433,10 +2458,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildSheetContent({
-    required FareEstimate? quote,
-    required bool quoteExpired,
-  }) {
+  Widget _buildSheetContent({required FareEstimate? quote}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2444,7 +2466,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Container(
             decoration: BoxDecoration(
               color: PassengerColors.verdeMarca,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(PassengerSpacing.radioTarjeta),
               boxShadow: [
                 BoxShadow(
                   color: PassengerColors.verdeMarca.withValues(alpha: 0.16),
@@ -2454,122 +2476,153 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ],
             ),
             child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(PassengerSpacing.paddingTarjeta),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
-                    '¿Cuánto quieres ofrecer?',
-                    style: TextStyle(
-                      color: PassengerColors.blanco,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  TextField(
-                    key: const ValueKey('passenger-offer-field'),
-                    controller: _passengerOfferController,
-                    enabled: !_requestingRide,
-                    onChanged: (_) {
-                      setState(() {});
-                    },
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: PassengerColors.textoPrimario,
-                      fontSize: 27,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    decoration: InputDecoration(
-                      prefixText: 'S/ ',
-                      prefixStyle: const TextStyle(
-                        color: PassengerColors.textoSecundario,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      hintText: '5.00',
-                      filled: true,
-                      fillColor: PassengerColors.crema,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 13,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(
-                          color: PassengerColors.acento,
-                          width: 2,
-                        ),
-                      ),
-                      disabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                      helperText: 'Este es el monto que verán los conductores.',
-                      helperStyle: const TextStyle(
+                  // FARE-PANEL-R1 (Etapa 2): fila "Mototaxi" — TukiTuki
+                  // es mono-vehículo, no es un selector de clase. El ⓘ
+                  // abre la hoja informativa; el lápiz lleva al mismo
+                  // gancho que el tap sobre la cifra (Etapa 4). Sobre
+                  // `verdeMarca` todo va en blanco / texto-sobre-oscuro,
+                  // nunca `acento` (contraste, HOME-DESIGN-R1).
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.electric_moped,
+                        size: 22,
                         color: PassengerColors.textoSecundarioSobreOscuro,
                       ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
-                      _buildMetricChip(
-                        label:
-                            '${(quote.distanceMeters / 1000).toStringAsFixed(1)} km',
-                      ),
-                      _buildMetricChip(
-                        label: '${(quote.durationSeconds / 60).round()} min',
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // HOME-DESIGN-R1: sin ícono de reloj (análisis de
-                  // contraste, 2026-08-26) — el texto ya dice
-                  // "vigente"/"vencida" sin ambigüedad, y el ícono
-                  // usaba `aviso` sobre `verdeMarca` (2.90:1, no
-                  // pasaba ni el mínimo de 3:1 de ícono ni el 4.5:1 de
-                  // texto). El texto de "vencida" pasa a
-                  // `textoSecundarioSobreOscuro` por la misma razón —
-                  // `aviso` deja de usarse sobre fondo oscuro.
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Flexible(
+                      const SizedBox(width: 10),
+                      const Expanded(
                         child: Text(
-                          quoteExpired
-                              ? 'Cotización vencida'
-                              : 'Cotización válida hasta '
-                                    '${_formatQuoteExpiry(quote.expiresAt)}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: PassengerColors.textoSecundarioSobreOscuro,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
+                          'Mototaxi',
+                          style: TextStyle(
+                            color: PassengerColors.blanco,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
+                      IconButton(
+                        key: const ValueKey('mototaxi-info-button'),
+                        tooltip: 'Información de Mototaxi',
+                        onPressed: _requestingRide ? null : _openMototaxiInfo,
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints.tightFor(
+                          width: PassengerSpacing.tamanoTocableMinimo,
+                          height: PassengerSpacing.tamanoTocableMinimo,
+                        ),
+                        color: PassengerColors.blanco,
+                        disabledColor: PassengerColors.textoBotonInactivo,
+                        icon: const Icon(Icons.info_outline, size: 22),
+                      ),
+                      IconButton(
+                        key: const ValueKey('mototaxi-edit-button'),
+                        tooltip: 'Ajustar tu tarifa',
+                        onPressed: _requestingRide ? null : _openOfferFareScreen,
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints.tightFor(
+                          width: PassengerSpacing.tamanoTocableMinimo,
+                          height: PassengerSpacing.tamanoTocableMinimo,
+                        ),
+                        color: PassengerColors.blanco,
+                        disabledColor: PassengerColors.textoBotonInactivo,
+                        icon: const Icon(Icons.edit, size: 20),
+                      ),
                     ],
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  // FARE-PANEL-R1: distancia y duración de la cotización
+                  // como una línea de texto discreta, no chips. Sobre
+                  // `verdeMarca` va en texto-sobre-oscuro (contraste,
+                  // HOME-DESIGN-R1).
+                  Text(
+                    '${(quote.distanceMeters / 1000).toStringAsFixed(1)} km'
+                    ' · ${(quote.durationSeconds / 60).round()} min',
+                    style: PassengerTypography.pista.copyWith(
+                      color: PassengerColors.textoSecundarioSobreOscuro,
+                    ),
+                  ),
+
+                  const SizedBox(height: PassengerSpacing.espacioInternoTarjeta),
+
+                  // FARE-PANEL-R1 (Etapa 2): stepper de precio en lugar
+                  // del `TextField` de texto libre. El monto no es
+                  // tecleable en esta etapa; solo −/+ en pasos de
+                  // S/ 0.50. Tocar la cifra (no los botones) lleva al
+                  // gancho de "Ofrece tu tarifa" (Etapa 4).
+                  Container(
+                    decoration: BoxDecoration(
+                      color: PassengerColors.crema,
+                      borderRadius: BorderRadius.circular(
+                        PassengerSpacing.radioCampoBoton,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    child: Row(
+                      children: [
+                        _buildOfferStepperButton(
+                          key: const ValueKey('offer-stepper-decrement'),
+                          icon: Icons.remove,
+                          tooltip: 'Bajar S/ 0.50',
+                          onPressed: _requestingRide ||
+                                  _offerCents <= _offerMinCents
+                              ? null
+                              : _decrementOffer,
+                        ),
+                        Expanded(
+                          child: InkWell(
+                            key: const ValueKey('offer-stepper-amount'),
+                            onTap: _requestingRide ? null : _openOfferFareScreen,
+                            borderRadius: BorderRadius.circular(
+                              PassengerSpacing.radioCampoBoton,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.baseline,
+                                textBaseline: TextBaseline.alphabetic,
+                                children: [
+                                  Text(
+                                    'S/ ',
+                                    style: PassengerTypography.prefijoMoneda
+                                        .copyWith(
+                                          color:
+                                              PassengerColors.textoSecundario,
+                                        ),
+                                  ),
+                                  Text(
+                                    _formatCentsAsSoles(_offerCents),
+                                    style: PassengerTypography.montoOferta
+                                        .copyWith(
+                                          color: PassengerColors.textoPrimario,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        _buildOfferStepperButton(
+                          key: const ValueKey('offer-stepper-increment'),
+                          icon: Icons.add,
+                          tooltip: 'Subir S/ 0.50',
+                          onPressed: _requestingRide ||
+                                  _offerCents >= _offerMaxCents
+                              ? null
+                              : _incrementOffer,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -2577,7 +2630,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
 
-        if (quote != null) const SizedBox(height: 20),
+        if (quote != null) const SizedBox(height: 16),
       ],
     );
   }
@@ -2593,10 +2646,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }) {
     return Container(
       key: const ValueKey('origin-destination-card'),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(PassengerSpacing.paddingTarjeta),
       decoration: BoxDecoration(
         color: PassengerColors.crema,
-        borderRadius: BorderRadius.circular(17),
+        borderRadius: BorderRadius.circular(PassengerSpacing.radioTarjeta),
         border: Border.all(color: PassengerColors.bordeSuave),
       ),
       child: Column(
@@ -2906,6 +2959,87 @@ class _PaymentMethodPickerSheet extends StatelessWidget {
             ),
           const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+}
+
+/// Hoja informativa de "Mototaxi" (`FARE-PANEL-R1`, Etapa 2).
+/// Puramente informativa: no navega ni devuelve valor. Mismo patrón de
+/// `showModalBottomSheet` que `_PaymentMethodPickerSheet`.
+class _MototaxiInfoSheet extends StatelessWidget {
+  const _MototaxiInfoSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        key: const ValueKey('mototaxi-info-sheet'),
+        padding: const EdgeInsets.fromLTRB(
+          PassengerSpacing.margenLateralPantalla,
+          12,
+          PassengerSpacing.margenLateralPantalla,
+          16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: PassengerColors.bordeSuave,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Icon(
+              Icons.electric_moped,
+              size: 40,
+              color: PassengerColors.textoPrimario,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Mototaxi',
+              textAlign: TextAlign.center,
+              style: PassengerTypography.tituloSeccion.copyWith(
+                color: PassengerColors.textoPrimario,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Viaja en mototaxi por Tarapoto. Propón tu precio y el '
+              'conductor decide si lo acepta.',
+              textAlign: TextAlign.center,
+              style: PassengerTypography.cuerpo.copyWith(
+                color: PassengerColors.textoSecundario,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              height: PassengerSpacing.alturaBotonPrincipal,
+              child: FilledButton(
+                key: const ValueKey('mototaxi-info-dismiss'),
+                onPressed: () => Navigator.pop(context),
+                style: FilledButton.styleFrom(
+                  backgroundColor: PassengerColors.amarilloCTA,
+                  foregroundColor: PassengerColors.verdeMarca,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(17),
+                  ),
+                ),
+                child: Text(
+                  'Entendido',
+                  style: PassengerTypography.botonPrincipal,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

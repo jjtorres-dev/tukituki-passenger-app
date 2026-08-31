@@ -103,6 +103,19 @@ class PassengerSpacing {
   /// en `sistema-de-diseno.md` §4.
   static const double radioTarjeta = 20;
 
+  /// Espaciado interno de una "tarjeta de contenido" (categoría de
+  /// superficie de `FARE-PANEL-R1`, la misma que introdujo
+  /// [radioTarjeta]). Agregados al compactar el panel de precio de la
+  /// hoja de Home: sus gaps verticales eran literales sueltos, sin
+  /// ritmo reutilizable. Pendiente de documentar en
+  /// `sistema-de-diseno.md` §4 al cerrar el checkpoint.
+  /// - [paddingTarjeta]: padding interno de la tarjeta (panel de
+  ///   precio `verdeMarca`, tarjeta flotante origen/destino).
+  /// - [espacioInternoTarjeta]: gap tenue entre elementos apilados
+  ///   dentro de la tarjeta.
+  static const double paddingTarjeta = 16;
+  static const double espacioInternoTarjeta = 8;
+
   /// Ningún elemento tocable mide menos de esto de lado.
   static const double tamanoTocableMinimo = 44;
 }

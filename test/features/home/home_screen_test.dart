@@ -129,13 +129,12 @@ void main() {
       await _selectDestinationOnMap(tester);
 
       expect(fareRepository.callCount, 1);
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+      expect(_offerAmountFinder, findsOneWidget);
 
-      // Reconstrucciones posteriores (p.ej. al escribir en el campo
-      // de oferta) NUNCA disparan una segunda solicitud para la
-      // misma selección.
-      await tester.enterText(_offerFieldFinder, '8.00');
-      await tester.pump();
+      // Reconstrucciones posteriores (p.ej. al ajustar el stepper de
+      // oferta) NUNCA disparan una segunda solicitud para la misma
+      // selección.
+      await _tapOfferIncrement(tester);
       await tester.pump();
 
       expect(fareRepository.callCount, 1);
@@ -156,7 +155,6 @@ void main() {
       );
 
       await _selectDestinationOnMap(tester);
-      await tester.enterText(_offerFieldFinder, '8.00');
       await tester.pump();
 
       expect(find.text('Ofrecer y buscar conductor'), findsOneWidget);
@@ -202,7 +200,7 @@ void main() {
     // La solicitud automática falló: sin quote, pero con un CTA
     // accionable y neutral para reintentar.
     expect(fareRepository.callCount, 1);
-    expect(find.text('¿Cuánto quieres ofrecer?'), findsNothing);
+    expect(_offerAmountFinder, findsNothing);
     expect(find.text('Calcular tarifa'), findsNothing);
     expect(find.text('Calcular nueva tarifa'), findsNothing);
     expect(find.text('Reintentar'), findsOneWidget);
@@ -214,7 +212,7 @@ void main() {
     await _flushAsync(tester);
 
     expect(fareRepository.callCount, 2);
-    expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+    expect(_offerAmountFinder, findsOneWidget);
   });
 
   testWidgets('G4B-R3-1/2: "Precio recomendado TukiTuki" y el monto grande '
@@ -235,9 +233,33 @@ void main() {
     expect(find.text('S/ 7.00'), findsNothing);
   });
 
-  testWidgets('G4B-R3-3: "¿Cuánto quieres ofrecer?" sí aparece', (
-    tester,
-  ) async {
+  testWidgets(
+    'FARE-PANEL-R1: el panel de oferta muestra stepper y línea de métricas, '
+    'sin título ni texto de ayuda',
+    (tester) async {
+      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
+      final rideRepository = _FakeRideRepository();
+
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: fareRepository,
+        rideRepository: rideRepository,
+      );
+
+      await _selectDestinationOnMap(tester);
+
+      expect(_offerAmountFinder, findsOneWidget);
+      expect(find.text('2.5 km · 8 min'), findsOneWidget);
+      expect(find.text('¿Cuánto quieres ofrecer?'), findsNothing);
+      expect(
+        find.text('Este es el monto que verán los conductores.'),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets('G4B-R3-4: tras cotizar, el stepper arranca en el mínimo '
+      'S/ 3.00 — NO se precarga con estimatedFare', (tester) async {
     final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
     final rideRepository = _FakeRideRepository();
 
@@ -249,15 +271,12 @@ void main() {
 
     await _selectDestinationOnMap(tester);
 
-    expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
-    expect(
-      find.text('Este es el monto que verán los conductores.'),
-      findsOneWidget,
-    );
+    expect(_shownOfferAmount(tester), 'S/ 3.00');
+    expect(find.text('7.00'), findsNothing);
   });
 
-  testWidgets('G4B-R3-4: tras cotizar, el input NO se precarga con '
-      'estimatedFare', (tester) async {
+  testWidgets('G4B-R3-5 (FARE-PANEL-R1): tocar + sube el monto mostrado en '
+      'pasos de S/ 0.50', (tester) async {
     final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
     final rideRepository = _FakeRideRepository();
 
@@ -269,26 +288,13 @@ void main() {
 
     await _selectDestinationOnMap(tester);
 
-    expect(_offerController(tester).text, isEmpty);
-  });
+    expect(_shownOfferAmount(tester), 'S/ 3.00');
 
-  testWidgets('G4B-R3-5: el Passenger ingresa S/ 8.00 y el controller '
-      'refleja ese valor', (tester) async {
-    final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-    final rideRepository = _FakeRideRepository();
+    await _tapOfferIncrement(tester);
+    expect(_shownOfferAmount(tester), 'S/ 3.50');
 
-    await _pumpHomeScreen(
-      tester,
-      fareRepository: fareRepository,
-      rideRepository: rideRepository,
-    );
-
-    await _selectDestinationOnMap(tester);
-
-    await tester.enterText(_offerFieldFinder, '8.00');
-    await tester.pump();
-
-    expect(_offerController(tester).text, '8.00');
+    await _tapOfferIncrement(tester);
+    expect(_shownOfferAmount(tester), 'S/ 4.00');
   });
 
   testWidgets(
@@ -307,10 +313,7 @@ void main() {
 
       expect(find.text('Recalcular tarifa'), findsNothing);
       expect(find.byIcon(Icons.refresh), findsNothing);
-      // El copy de vigencia de la cotización sigue teniendo sentido:
-      // ahora es lo único que anticipa que el CTA cambiará a
-      // "Calcular nueva tarifa" cuando la cotización expire.
-      expect(find.textContaining('Cotización válida hasta'), findsOneWidget);
+      expect(find.textContaining('Cotización'), findsNothing);
     },
   );
 
@@ -336,14 +339,11 @@ void main() {
       // Passenger dejó la pantalla abierta). Ya no hay ningún botón
       // "Calcular [nueva] tarifa" que tocar — se renueva sola.
       expect(fareRepository.callCount, 2);
-      expect(find.text('Cotización vencida'), findsNothing);
       expect(find.text('Calcular tarifa'), findsNothing);
       expect(find.text('Calcular nueva tarifa'), findsNothing);
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+      expect(_offerAmountFinder, findsOneWidget);
 
-      await tester.enterText(_offerFieldFinder, '8.00');
-      await tester.pump();
-
+      // Sin tocar el stepper: la oferta mínima (S/ 3.00) ya es válida.
       final button = tester.widget<FilledButton>(find.byType(FilledButton));
       expect(button.onPressed, isNotNull);
 
@@ -351,7 +351,7 @@ void main() {
       await _flushAsync(tester);
 
       expect(rideRepository.createRideCalls, hasLength(1));
-      expect(rideRepository.createRideCalls.single, '8.00');
+      expect(rideRepository.createRideCalls.single, '3.00');
     },
   );
 
@@ -374,9 +374,10 @@ void main() {
     await _selectDestinationOnMap(tester);
     expect(fareRepository.callCount, 1);
 
-    await tester.enterText(_offerFieldFinder, '8.00');
-    await tester.pump();
-    expect(_offerController(tester).text, '8.00');
+    // El Passenger ajusta la oferta con el stepper: 3.00 → 4.00.
+    await _tapOfferIncrement(tester);
+    await _tapOfferIncrement(tester);
+    expect(_shownOfferAmount(tester), 'S/ 4.00');
 
     // Deja vencer la cotización: el Timer interno dispara la
     // renovación solo, sin ningún tap del Passenger.
@@ -387,9 +388,9 @@ void main() {
     expect(find.text('Calcular tarifa'), findsNothing);
     expect(find.text('Calcular nueva tarifa'), findsNothing);
     expect(find.text('Reintentar'), findsNothing);
-    // La oferta escrita sobrevive intacta a la renovación interna.
-    expect(_offerController(tester).text, '8.00');
-    expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+    // El monto ajustado sobrevive intacto a la renovación interna.
+    expect(_shownOfferAmount(tester), 'S/ 4.00');
+    expect(_offerAmountFinder, findsOneWidget);
   });
 
   testWidgets('G4B-R5.1-4/5: cambiar de destino con una request pendiente — la '
@@ -432,7 +433,7 @@ void main() {
     // La respuesta de A quedó descartada por completo: sigue sin
     // quote (B todavía no respondió) y sin oferta visible.
     expect(state.debugQuoteId, isNull);
-    expect(find.text('¿Cuánto quieres ofrecer?'), findsNothing);
+    expect(_offerAmountFinder, findsNothing);
 
     // Responde B.
     fareRepository.resolveCall(1);
@@ -440,7 +441,7 @@ void main() {
 
     // Solo B quedó como quote vigente (segunda solicitud = quote-2).
     expect(state.debugQuoteId, 'quote-2');
-    expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+    expect(_offerAmountFinder, findsOneWidget);
   });
 
   testWidgets(
@@ -549,7 +550,7 @@ void main() {
         find.text('Jr. Jiménez Pimentel 210, Tarapoto 22202, Perú'),
         findsOneWidget,
       );
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+      expect(_offerAmountFinder, findsOneWidget);
     },
   );
 
@@ -684,80 +685,26 @@ void main() {
       // sigue siendo honesto: nadie inventó una calle.
       expect(find.text('Destino seleccionado'), findsOneWidget);
       expect(find.text('Destino seleccionado en el mapa'), findsNothing);
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+      expect(_offerAmountFinder, findsOneWidget);
 
-      await tester.enterText(_offerFieldFinder, '8.00');
-      await tester.pump();
-
+      // El stepper arranca en la oferta mínima válida; el CTA no
+      // depende de que el Passenger ajuste nada.
       final button = tester.widget<FilledButton>(find.byType(FilledButton));
       expect(button.onPressed, isNotNull);
     },
   );
 
-  testWidgets(
-    'G4B-R3-7: input vacío deja deshabilitado el botón y no crea Ride',
-    (tester) async {
-      final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-      final rideRepository = _FakeRideRepository();
-
-      await _pumpHomeScreen(
-        tester,
-        fareRepository: fareRepository,
-        rideRepository: rideRepository,
-      );
-
-      await _selectDestinationOnMap(tester);
-
-      final button = tester.widget<FilledButton>(find.byType(FilledButton));
-      expect(button.onPressed, isNull);
-      expect(rideRepository.createRideCalls, isEmpty);
-    },
-  );
-
-  testWidgets('G4B-R3-8: input 0 no habilita el botón de oferta', (
-    tester,
-  ) async {
-    final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-    final rideRepository = _FakeRideRepository();
-
-    await _pumpHomeScreen(
-      tester,
-      fareRepository: fareRepository,
-      rideRepository: rideRepository,
-    );
-
-    await _selectDestinationOnMap(tester);
-
-    await tester.enterText(_offerFieldFinder, '0');
-    await tester.pump();
-
-    final button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNull);
-  });
-
-  testWidgets('G4B-R3-9: más de 2 decimales no habilita el botón de oferta', (
-    tester,
-  ) async {
-    final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
-    final rideRepository = _FakeRideRepository();
-
-    await _pumpHomeScreen(
-      tester,
-      fareRepository: fareRepository,
-      rideRepository: rideRepository,
-    );
-
-    await _selectDestinationOnMap(tester);
-
-    await tester.enterText(_offerFieldFinder, '8.123');
-    await tester.pump();
-
-    final button = tester.widget<FilledButton>(find.byType(FilledButton));
-    expect(button.onPressed, isNull);
-  });
+  // FARE-PANEL-R1 (Etapa 2): G4B-R3-7/8/9 validaban el campo de texto
+  // libre de la oferta (vacío / 0 / >2 decimales dejaban el CTA
+  // deshabilitado). El stepper reemplazó ese campo: la oferta siempre
+  // está clampeada en [S/ 3.00, S/ 50.00] y ya no puede ser inválida,
+  // así que esos tres casos dejaron de existir. La cobertura de los
+  // límites del stepper vive en el grupo
+  // 'FARE-PANEL-R1 — stepper de precio y Mototaxi'.
 
   testWidgets(
-    'G4B-R3-10: oferta válida envía passengerOfferFare exacto a createRide',
+    'G4B-R3-10 (FARE-PANEL-R1): createRide recibe el monto formado desde '
+    'el stepper (_offerCents)',
     (tester) async {
       final fareRepository = _FakeFareRepository(estimatedFare: '7.00');
       final rideRepository = _FakeRideRepository();
@@ -770,8 +717,10 @@ void main() {
 
       await _selectDestinationOnMap(tester);
 
-      await tester.enterText(_offerFieldFinder, '8.00');
-      await tester.pump();
+      // 3.00 → 3.50 → 4.00
+      await _tapOfferIncrement(tester);
+      await _tapOfferIncrement(tester);
+      expect(_shownOfferAmount(tester), 'S/ 4.00');
 
       final button = tester.widget<FilledButton>(find.byType(FilledButton));
       expect(button.onPressed, isNotNull);
@@ -780,7 +729,7 @@ void main() {
       await _flushAsync(tester);
 
       expect(rideRepository.createRideCalls, hasLength(1));
-      expect(rideRepository.createRideCalls.single, '8.00');
+      expect(rideRepository.createRideCalls.single, '4.00');
     },
   );
 
@@ -810,7 +759,6 @@ void main() {
         );
 
         await _selectDestinationOnMap(tester);
-        await tester.enterText(_offerFieldFinder, '8.00');
         await tester.pump();
 
         tester.view.viewInsets = const FakeViewPadding(bottom: 300);
@@ -1144,7 +1092,7 @@ void main() {
         expect(map.padding.bottom, greaterThan(0));
         expect(find.descendant(of: sheet, matching: card), findsNothing);
         expect(
-          find.descendant(of: sheet, matching: _offerFieldFinder),
+          find.descendant(of: sheet, matching: _offerAmountFinder),
           findsOneWidget,
         );
         expect(find.text('¿A dónde vamos?'), findsNothing);
@@ -1257,7 +1205,7 @@ void main() {
       await _flushAsync(tester);
 
       expect(fareRepository.callCount, 1);
-      expect(find.text('¿Cuánto quieres ofrecer?'), findsOneWidget);
+      expect(_offerAmountFinder, findsOneWidget);
     });
 
     testWidgets('la sugerencia queda deshabilitada mientras no hay GPS', (
@@ -1471,9 +1419,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('payment-option-yape')));
       await tester.pumpAndSettle();
 
-      await tester.enterText(_offerFieldFinder, '8.00');
-      await tester.pump();
-
       await tester.tap(find.byType(FilledButton));
       await _flushAsync(tester);
 
@@ -1493,7 +1438,6 @@ void main() {
       );
 
       await _selectDestinationOnMap(tester);
-      await tester.enterText(_offerFieldFinder, '8.00');
       await tester.pump();
 
       await tester.tap(find.byType(FilledButton));
@@ -1502,12 +1446,238 @@ void main() {
       expect(rideRepository.createRidePaymentMethods, ['CASH']);
     });
   });
+
+  group('FARE-PANEL-R1 — stepper de precio y Mototaxi', () {
+    testWidgets(
+      'sin destino/cotización, el stepper y la fila Mototaxi no se dibujan',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+        );
+
+        expect(_offerAmountFinder, findsNothing);
+        expect(find.byKey(const ValueKey('mototaxi-info-button')), findsNothing);
+
+        await _selectDestinationOnMap(tester);
+
+        expect(_offerAmountFinder, findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('mototaxi-info-button')),
+          findsOneWidget,
+        );
+        expect(_shownOfferAmount(tester), 'S/ 3.00');
+      },
+    );
+
+    testWidgets('+ y − mueven el monto en pasos de S/ 0.50', (tester) async {
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: _FakeRideRepository(),
+      );
+      await _selectDestinationOnMap(tester);
+
+      expect(_shownOfferAmount(tester), 'S/ 3.00');
+
+      await _tapOfferIncrement(tester);
+      expect(_shownOfferAmount(tester), 'S/ 3.50');
+
+      await _tapOfferIncrement(tester);
+      expect(_shownOfferAmount(tester), 'S/ 4.00');
+
+      await tester.tap(_offerDecrementFinder);
+      await tester.pump();
+      expect(_shownOfferAmount(tester), 'S/ 3.50');
+    });
+
+    testWidgets('el botón − está deshabilitado en el mínimo S/ 3.00', (
+      tester,
+    ) async {
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: _FakeRideRepository(),
+      );
+      await _selectDestinationOnMap(tester);
+
+      expect(_shownOfferAmount(tester), 'S/ 3.00');
+      expect(
+        tester.widget<IconButton>(_offerDecrementFinder).onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<IconButton>(_offerIncrementFinder).onPressed,
+        isNotNull,
+      );
+    });
+
+    testWidgets('el botón + está deshabilitado en el máximo S/ 50.00', (
+      tester,
+    ) async {
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: _FakeRideRepository(),
+      );
+      await _selectDestinationOnMap(tester);
+
+      // (5000 - 300) / 50 = 94 pasos hasta el tope.
+      for (var i = 0; i < 94; i++) {
+        await _tapOfferIncrement(tester);
+      }
+
+      expect(_shownOfferAmount(tester), 'S/ 50.00');
+      expect(
+        tester.widget<IconButton>(_offerIncrementFinder).onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<IconButton>(_offerDecrementFinder).onPressed,
+        isNotNull,
+      );
+
+      // Un tap extra sobre el botón deshabilitado no cambia nada.
+      await tester.tap(_offerIncrementFinder);
+      await tester.pump();
+      expect(_shownOfferAmount(tester), 'S/ 50.00');
+    });
+
+    testWidgets(
+      'tocar la cifra y el lápiz de Mototaxi llaman al gancho de Etapa 4 '
+      'sin lanzar error (el método está vacío)',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+        );
+        await _selectDestinationOnMap(tester);
+
+        await tester.tap(_offerAmountFinder);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(find.byKey(const ValueKey('mototaxi-edit-button')));
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+
+        // Ninguno de los dos navega ni abre una hoja.
+        expect(find.byKey(const ValueKey('mototaxi-info-sheet')), findsNothing);
+        expect(find.byType(HomeScreen), findsOneWidget);
+      },
+    );
+
+    testWidgets('el ⓘ abre la hoja informativa y "Entendido" la cierra', (
+      tester,
+    ) async {
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: _FakeRideRepository(),
+      );
+      await _selectDestinationOnMap(tester);
+
+      expect(find.byKey(const ValueKey('mototaxi-info-sheet')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('mototaxi-info-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('mototaxi-info-sheet')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('mototaxi-info-sheet')),
+          matching: find.text('Mototaxi'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Viaja en mototaxi por Tarapoto. Propón tu precio y el '
+          'conductor decide si lo acepta.',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('mototaxi-info-dismiss')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('mototaxi-info-sheet')), findsNothing);
+    });
+
+    testWidgets('mientras se pide el viaje, −/+, cifra, ⓘ y lápiz quedan '
+        'deshabilitados', (tester) async {
+      final rideRepository = _FakeRideRepository();
+
+      await _pumpRoutedHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: rideRepository,
+      );
+
+      await _selectDestinationOnMap(tester);
+
+      // Deja la request de createRide en vuelo para observar el estado
+      // `_requestingRide == true`.
+      rideRepository.holdCreateRide = true;
+      await tester.tap(find.byType(FilledButton));
+      await tester.pump();
+
+      expect(
+        tester.widget<IconButton>(_offerIncrementFinder).onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<IconButton>(_offerDecrementFinder).onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<IconButton>(
+          find.byKey(const ValueKey('mototaxi-info-button')),
+        ).onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<IconButton>(
+          find.byKey(const ValueKey('mototaxi-edit-button')),
+        ).onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<InkWell>(_offerAmountFinder).onTap,
+        isNull,
+      );
+
+      rideRepository.releaseCreateRide();
+      await _flushAsync(tester);
+    });
+  });
 }
 
-final _offerFieldFinder = find.byKey(const ValueKey('passenger-offer-field'));
+// FARE-PANEL-R1 (Etapa 2): la oferta se ajusta con el stepper −/+, ya
+// no con un `TextField` de texto libre.
+final _offerAmountFinder = find.byKey(const ValueKey('offer-stepper-amount'));
+final _offerIncrementFinder = find.byKey(
+  const ValueKey('offer-stepper-increment'),
+);
+final _offerDecrementFinder = find.byKey(
+  const ValueKey('offer-stepper-decrement'),
+);
 
-TextEditingController _offerController(WidgetTester tester) {
-  return tester.widget<TextField>(_offerFieldFinder).controller!;
+/// Concatena los dos `Text` del stepper ("S/ " + "3.00") → "S/ 3.00".
+String _shownOfferAmount(WidgetTester tester) {
+  return tester
+      .widgetList<Text>(
+        find.descendant(of: _offerAmountFinder, matching: find.byType(Text)),
+      )
+      .map((t) => t.data ?? '')
+      .join();
+}
+
+Future<void> _tapOfferIncrement(WidgetTester tester) async {
+  await tester.tap(_offerIncrementFinder);
+  await tester.pump();
 }
 
 /// G4B-R5: seleccionar destino ya dispara la cotización sola — no
@@ -1915,6 +2085,16 @@ class _FakeRideRepository extends RideRepository {
   final List<String> createRideCalls = [];
   final List<String> createRidePaymentMethods = [];
 
+  /// FARE-PANEL-R1 (Etapa 2): si se activa, `createRide` queda en vuelo
+  /// hasta `releaseCreateRide()` — para observar `_requestingRide`.
+  bool holdCreateRide = false;
+  Completer<void>? _createRideGate;
+
+  void releaseCreateRide() {
+    _createRideGate?.complete();
+    _createRideGate = null;
+  }
+
   /// SUGGESTED-DESTINATIONS-R1: vacío por defecto — ningún test
   /// existente ve sugerencias a menos que las pida explícitamente.
   List<RideHistoryItem> history;
@@ -1937,6 +2117,11 @@ class _FakeRideRepository extends RideRepository {
   }) async {
     createRideCalls.add(passengerOfferFare);
     createRidePaymentMethods.add(paymentMethod);
+
+    if (holdCreateRide) {
+      _createRideGate = Completer<void>();
+      await _createRideGate!.future;
+    }
 
     return _ride(id: 'ride-created', passengerOfferFare: passengerOfferFare);
   }
