@@ -17,6 +17,10 @@ import 'package:passenger/features/fare/domain/fare_estimate.dart';
 import 'package:passenger/features/home/home_screen.dart';
 import 'package:passenger/features/home/offer_fare_screen.dart';
 import 'package:passenger/features/home/profile_menu_drawer.dart';
+import 'package:passenger/features/notifications/data/device_id_store.dart';
+import 'package:passenger/features/notifications/data/push_messaging_service.dart';
+import 'package:passenger/features/notifications/data/push_registration_coordinator.dart';
+import 'package:passenger/features/notifications/data/push_registration_repository.dart';
 import 'package:passenger/features/passenger/data/passenger_profile_repository.dart';
 import 'package:passenger/features/passenger/domain/passenger_profile.dart';
 import 'package:passenger/features/passenger/presentation/edit_profile_screen.dart';
@@ -2020,6 +2024,143 @@ void main() {
       },
     );
   });
+
+  group('PASSENGER-PUSH-R1 (fix): registro de push tras el permiso de '
+      'ubicación', () {
+    testWidgets(
+      'permiso de ubicación denegado en el check y concedido en el '
+      'request → el registro de push se dispara una vez, después de '
+      'resolver el permiso',
+      (tester) async {
+        final coordinator = _FakePushRegistrationCoordinator();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          geolocatorPlatform: _FakeGeolocatorPlatform(
+            permissionOnCheck: LocationPermission.denied,
+            permissionOnRequest: LocationPermission.whileInUse,
+          ),
+          pushCoordinator: coordinator,
+        );
+
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'permiso de ubicación denegado en el check Y en el request → el '
+      'registro de push se dispara igual (el finally corre en el camino '
+      'de permiso denegado)',
+      (tester) async {
+        final coordinator = _FakePushRegistrationCoordinator();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          geolocatorPlatform: _FakeGeolocatorPlatform(
+            permissionOnCheck: LocationPermission.denied,
+            permissionOnRequest: LocationPermission.denied,
+          ),
+          pushCoordinator: coordinator,
+        );
+
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'el registro de push NO se dispara ANTES de que el permiso de '
+      'ubicación resuelva: con requestPermission() colgado, syncCalls '
+      'sigue en 0; al liberarlo, pasa a 1',
+      (tester) async {
+        final coordinator = _FakePushRegistrationCoordinator();
+        final geolocator = _FakeGeolocatorPlatform(
+          permissionOnCheck: LocationPermission.denied,
+          permissionOnRequest: LocationPermission.denied,
+          holdRequestPermission: true,
+        );
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          geolocatorPlatform: geolocator,
+          pushCoordinator: coordinator,
+        );
+
+        // _loadCurrentLocation() está esperando en requestPermission():
+        // el permiso de ubicación todavía no se resolvió, así que el
+        // registro de push todavía no debe haberse disparado.
+        expect(coordinator.syncCalls, 0);
+
+        geolocator.releaseRequestPermissionHold();
+        await _flushAsync(tester);
+
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'servicio de ubicación apagado → el registro de push se dispara '
+      'igual (early return dentro del try, el finally corre)',
+      (tester) async {
+        final coordinator = _FakePushRegistrationCoordinator();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          geolocatorPlatform: _FakeGeolocatorPlatform(serviceEnabled: false),
+          pushCoordinator: coordinator,
+        );
+
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'getCurrentPosition lanza una excepción → el registro de push se '
+      'dispara igual (catch + finally)',
+      (tester) async {
+        final coordinator = _FakePushRegistrationCoordinator();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          geolocatorPlatform: _FakeGeolocatorPlatform(throwOnGetPosition: true),
+          pushCoordinator: coordinator,
+        );
+
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'volver a tocar el botón de recentrar NO vuelve a registrar el '
+      'dispositivo (guard _pushRegistrationRequested, una vez por vida '
+      'del State)',
+      (tester) async {
+        final coordinator = _FakePushRegistrationCoordinator();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          pushCoordinator: coordinator,
+        );
+
+        expect(coordinator.syncCalls, 1);
+
+        await _tapCenterOnMyLocation(tester);
+
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+  });
 }
 
 // FARE-PANEL-R1 (Etapa 2): la oferta se ajusta con el stepper −/+, ya
@@ -2115,6 +2256,7 @@ Future<void> _pumpHomeScreen(
   AuthRepository? authRepository,
   List<Position>? locationSequence,
   _FakeGeolocatorPlatform? geolocatorPlatform,
+  PushRegistrationCoordinator? pushCoordinator,
   MediaQueryData? mediaQueryData,
 }) async {
   GeolocatorPlatform.instance =
@@ -2131,6 +2273,13 @@ Future<void> _pumpHomeScreen(
         ),
         passengerProfileRepositoryProvider.overrideWithValue(
           passengerProfileRepository ?? _FakePassengerProfileRepository(),
+        ),
+        // PASSENGER-PUSH-R1 (fix): HomeScreen dispara el registro de
+        // push tras resolver el permiso de ubicación. El coordinador
+        // real toca FirebaseMessaging.instance (ausente en flutter_test);
+        // se reemplaza por un doble no-op salvo que el test pase otro.
+        pushRegistrationCoordinatorProvider.overrideWithValue(
+          pushCoordinator ?? _FakePushRegistrationCoordinator(),
         ),
         if (authRepository != null)
           authRepositoryProvider.overrideWithValue(authRepository),
@@ -2157,6 +2306,7 @@ Future<void> _pumpHomeScreenWithLoginRoute(
   required RideRepository rideRepository,
   required AuthRepository authRepository,
   PassengerProfileRepository? passengerProfileRepository,
+  PushRegistrationCoordinator? pushCoordinator,
 }) async {
   GeolocatorPlatform.instance = _FakeGeolocatorPlatform();
 
@@ -2183,6 +2333,9 @@ Future<void> _pumpHomeScreenWithLoginRoute(
         passengerProfileRepositoryProvider.overrideWithValue(
           passengerProfileRepository ?? _FakePassengerProfileRepository(),
         ),
+        pushRegistrationCoordinatorProvider.overrideWithValue(
+          pushCoordinator ?? _FakePushRegistrationCoordinator(),
+        ),
         authRepositoryProvider.overrideWithValue(authRepository),
       ],
       child: MaterialApp.router(routerConfig: router),
@@ -2197,6 +2350,7 @@ Future<void> _pumpRoutedHomeScreen(
   required FareRepository fareRepository,
   required RideRepository rideRepository,
   PaymentPreferenceRepository? paymentPreferenceRepository,
+  PushRegistrationCoordinator? pushCoordinator,
 }) async {
   GeolocatorPlatform.instance = _FakeGeolocatorPlatform();
 
@@ -2222,6 +2376,9 @@ Future<void> _pumpRoutedHomeScreen(
         ),
         passengerProfileRepositoryProvider.overrideWithValue(
           _FakePassengerProfileRepository(),
+        ),
+        pushRegistrationCoordinatorProvider.overrideWithValue(
+          pushCoordinator ?? _FakePushRegistrationCoordinator(),
         ),
       ],
       child: MaterialApp.router(routerConfig: router),
@@ -2279,7 +2436,15 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform {
   /// una secuencia, cada llamada devuelve el siguiente punto (se
   /// queda en el último una vez agotada), para simular al Passenger
   /// moviéndose entre aperturas/taps de "centrar en mi ubicación".
-  _FakeGeolocatorPlatform({this.positions, this.hold = false});
+  _FakeGeolocatorPlatform({
+    this.positions,
+    this.hold = false,
+    this.serviceEnabled = true,
+    this.permissionOnCheck = LocationPermission.whileInUse,
+    this.permissionOnRequest = LocationPermission.whileInUse,
+    this.holdRequestPermission = false,
+    this.throwOnGetPosition = false,
+  });
 
   final List<Position>? positions;
   int _callIndex = 0;
@@ -2290,23 +2455,60 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform {
   final bool hold;
   final Completer<void> _holdCompleter = Completer<void>();
 
+  /// PASSENGER-PUSH-R1 (fix): controles del paso de permiso de
+  /// ubicación de `_loadCurrentLocation()`. Por defecto replican el
+  /// comportamiento previo (servicio activo, permiso `whileInUse` en el
+  /// check, sin pasar por `requestPermission()`), así que ningún test
+  /// existente cambia.
+  final bool serviceEnabled;
+  final LocationPermission permissionOnCheck;
+  final LocationPermission permissionOnRequest;
+
+  /// Si es `true`, `requestPermission()` queda pendiente hasta
+  /// [releaseRequestPermissionHold] — para probar que el registro de
+  /// push NO se dispara antes de que el permiso de ubicación resuelva.
+  final bool holdRequestPermission;
+  final Completer<void> _requestPermissionHoldCompleter = Completer<void>();
+
+  /// Si es `true`, `getCurrentPosition()` lanza — para probar que el
+  /// `finally` (y con él el registro de push) corre igual ante un
+  /// error de GPS.
+  final bool throwOnGetPosition;
+
   void releaseHold() {
     if (!_holdCompleter.isCompleted) {
       _holdCompleter.complete();
     }
   }
 
-  @override
-  Future<bool> isLocationServiceEnabled() async => true;
+  void releaseRequestPermissionHold() {
+    if (!_requestPermissionHoldCompleter.isCompleted) {
+      _requestPermissionHoldCompleter.complete();
+    }
+  }
 
   @override
-  Future<LocationPermission> checkPermission() async =>
-      LocationPermission.whileInUse;
+  Future<bool> isLocationServiceEnabled() async => serviceEnabled;
+
+  @override
+  Future<LocationPermission> checkPermission() async => permissionOnCheck;
+
+  @override
+  Future<LocationPermission> requestPermission() async {
+    if (holdRequestPermission) {
+      await _requestPermissionHoldCompleter.future;
+    }
+    return permissionOnRequest;
+  }
 
   @override
   Future<Position> getCurrentPosition({
     LocationSettings? locationSettings,
   }) async {
+    if (throwOnGetPosition) {
+      throw Exception('GPS falló en el test');
+    }
+
     if (hold) {
       await _holdCompleter.future;
     }
@@ -2322,6 +2524,38 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform {
     _callIndex++;
 
     return position;
+  }
+}
+
+class _NoopPushMessagingService implements PushMessagingService {
+  @override
+  Future<bool> requestPermission() async => false;
+
+  @override
+  Future<String?> getToken() async => null;
+
+  @override
+  Stream<String> get onTokenRefresh => const Stream<String>.empty();
+}
+
+/// PASSENGER-PUSH-R1 (fix): doble del coordinador de push para los
+/// tests de Home. Cuenta las invocaciones de `syncDeviceRegistration()`
+/// para verificar CUÁNDO dispara `HomeScreen` el registro (después de
+/// resolver el permiso de ubicación) y que el guard local lo limita a
+/// una vez.
+class _FakePushRegistrationCoordinator extends PushRegistrationCoordinator {
+  _FakePushRegistrationCoordinator()
+    : super(
+        _NoopPushMessagingService(),
+        DeviceIdStore(const FlutterSecureStorage()),
+        PushRegistrationRepository(Dio()),
+      );
+
+  int syncCalls = 0;
+
+  @override
+  Future<void> syncDeviceRegistration() async {
+    syncCalls += 1;
   }
 }
 

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../notifications/data/push_registration_coordinator.dart';
 import '../../passenger/data/passenger_profile_repository.dart';
 import '../../ride/data/ride_repository.dart';
 import '../data/auth_repository.dart';
@@ -163,7 +164,44 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         activeRideId: activeRide?.id,
       );
 
+      final goesToHome =
+          sessionState.kind == PassengerSessionKind.ready &&
+          sessionState.activeRideId == null;
+
       context.go(routeForPassengerSessionState(sessionState));
+
+      // PASSENGER-PUSH-R1 (Etapa 1): registro del dispositivo push,
+      // solo con sesión válida. Best-effort y sin `await` — no debe
+      // demorar ni condicionar la navegación. El coordinador es
+      // provider-scoped (no vive en el `State` de esta pantalla), así
+      // que un fallo o demora aquí es inofensivo. El `.catchError` es
+      // defensa extra por si algún cambio futuro rompe el contrato
+      // "nunca lanza" del coordinador (hoy ya envuelve todo en un
+      // try/catch interno).
+      //
+      // PASSENGER-PUSH-R1 (fix): el carve-out de `/home`. En `/home`,
+      // `HomeScreen` pide el permiso de ubicación (Geolocator) apenas
+      // monta; si el registro de push disparara aquí, su
+      // `requestPermission()` de notificaciones abriría un diálogo
+      // nativo que le gana la carrera al de ubicación, y Android solo
+      // permite un diálogo de permiso a la vez — el segundo queda
+      // colgado. Por eso en `/home` el registro lo dispara `HomeScreen`
+      // recién después de resolver su permiso de ubicación. Las otras
+      // dos rutas de éxito (`/complete-profile`, `/ride/:rideId`) no
+      // piden ningún permiso del sistema: ahí no hay carrera y se
+      // registra aquí como siempre.
+      if (!goesToHome) {
+        unawaited(
+          ref
+              .read(pushRegistrationCoordinatorProvider)
+              .syncDeviceRegistration()
+              .catchError((Object error) {
+                debugPrint(
+                  'PASSENGER PUSH - syncDeviceRegistration inesperado: $error',
+                );
+              }),
+        );
+      }
     } on DioException catch (error) {
       debugPrint(
         'Error HTTP restaurando sesión del pasajero: '

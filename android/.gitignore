@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Real Firebase config (google-services.json). NEVER commit this.
+# See app/google-services.json.example for the versioned placeholder.
+/app/google-services.json

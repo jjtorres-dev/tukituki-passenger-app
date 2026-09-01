@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,10 @@ import 'package:go_router/go_router.dart';
 import 'package:passenger/features/auth/data/auth_repository.dart';
 import 'package:passenger/features/auth/domain/public_user.dart';
 import 'package:passenger/features/auth/presentation/splash_screen.dart';
+import 'package:passenger/features/notifications/data/device_id_store.dart';
+import 'package:passenger/features/notifications/data/push_messaging_service.dart';
+import 'package:passenger/features/notifications/data/push_registration_coordinator.dart';
+import 'package:passenger/features/notifications/data/push_registration_repository.dart';
 import 'package:passenger/features/passenger/data/passenger_profile_repository.dart';
 import 'package:passenger/features/ride/data/ride_repository.dart';
 import 'package:passenger/features/ride/domain/passenger_ride.dart';
@@ -354,6 +360,237 @@ void main() {
     expect(profileRepository.getMyProfileCalls, 0);
     expect(rideRepository.getActiveRideCalls, 0);
   });
+
+  group('PASSENGER-PUSH-R1 (Etapa 1): registro de dispositivo push', () {
+    testWidgets(
+      'con destino /home el splash NO dispara push (lo hace HomeScreen '
+      'tras resolver el permiso de ubicación) — la navegación a /home se '
+      'completa igual',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: true),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: const {'id': 'profile-1'},
+        );
+        final rideRepository = _FakeRideRepository();
+        final coordinator = _FakePushRegistrationCoordinator();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          coordinator: coordinator,
+        );
+
+        expect(router.routeInformationProvider.value.uri.path, '/home');
+        expect(coordinator.syncCalls, 0);
+      },
+    );
+
+    testWidgets('sin sesión NO se intenta registrar el dispositivo', (
+      tester,
+    ) async {
+      final authRepository = _FakeAuthRepository(hasSessionValue: false);
+      final profileRepository = _FakePassengerProfileRepository();
+      final rideRepository = _FakeRideRepository();
+      final coordinator = _FakePushRegistrationCoordinator();
+      final router = _splashRouter();
+      addTearDown(router.dispose);
+
+      await _pumpSplash(
+        tester,
+        router: router,
+        authRepository: authRepository,
+        profileRepository: profileRepository,
+        rideRepository: rideRepository,
+        coordinator: coordinator,
+      );
+
+      expect(router.routeInformationProvider.value.uri.path, '/login');
+      expect(coordinator.syncCalls, 0);
+    });
+
+    testWidgets(
+      'perfil incompleto también dispara el registro antes de ir a '
+      '/complete-profile — el enganche es después de resolver el estado '
+      'de sesión (ruta distinta a /home), y la navegación se completa '
+      'aunque el coordinador nunca termine',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: false),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: null,
+        );
+        final rideRepository = _FakeRideRepository();
+        final coordinator = _FakePushRegistrationCoordinator(
+          behavior: _CoordinatorBehavior.hangs,
+        );
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          coordinator: coordinator,
+        );
+
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          '/complete-profile',
+        );
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'perfil 404 con ride activo (tercer destino de éxito, /ride/:id) '
+      'también dispara el registro',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: false),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: null,
+        );
+        final rideRepository = _FakeRideRepository(activeRide: _ride());
+        final coordinator = _FakePushRegistrationCoordinator();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          coordinator: coordinator,
+        );
+
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          '/ride/ride-active',
+        );
+        expect(coordinator.syncCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'PASSENGER PENDING inválido limpia la sesión antes de la línea de '
+      'éxito → no se intenta registrar el dispositivo',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(status: 'PENDING', isPhoneVerified: true),
+        );
+        final profileRepository = _FakePassengerProfileRepository();
+        final rideRepository = _FakeRideRepository();
+        final coordinator = _FakePushRegistrationCoordinator();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          coordinator: coordinator,
+        );
+
+        expect(router.routeInformationProvider.value.uri.path, '/login');
+        expect(authRepository.clearSessionCalls, 1);
+        expect(coordinator.syncCalls, 0);
+      },
+    );
+
+    testWidgets(
+      '401 definitivo de auth/me también limpia sesión sin registrar el '
+      'dispositivo',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          getMeError: _dioHttpError('auth/me', 401),
+        );
+        final profileRepository = _FakePassengerProfileRepository();
+        final rideRepository = _FakeRideRepository();
+        final coordinator = _FakePushRegistrationCoordinator();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          coordinator: coordinator,
+        );
+
+        expect(router.routeInformationProvider.value.uri.path, '/login');
+        expect(authRepository.clearSessionCalls, 1);
+        expect(coordinator.syncCalls, 0);
+      },
+    );
+
+    testWidgets(
+      'dos entradas a /splash con sesión válida en la misma sesión de la '
+      'app (p. ej. logout/login), destino /complete-profile → dos '
+      'registros con el mismo coordinador, sin lanzar (idempotencia del '
+      'coordinador provider-scoped; /complete-profile sí registra desde '
+      'el splash, no tiene la carrera de permisos de /home)',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: false),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: null,
+        );
+        final rideRepository = _FakeRideRepository();
+        final coordinator = _FakePushRegistrationCoordinator();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          coordinator: coordinator,
+        );
+
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          '/complete-profile',
+        );
+        expect(coordinator.syncCalls, 1);
+
+        // Simula reentrar a /splash dentro del mismo proceso de la app
+        // (misma ProviderScope, mismo coordinador) — p. ej. tras un
+        // logout/login sin reiniciar la app. Un pump vacío primero
+        // procesa la navegación (monta el SplashScreen nuevo y corre su
+        // initState) antes de avanzar el reloj del delay inicial.
+        router.go('/splash');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 801));
+        await _flushSplash(tester);
+
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          '/complete-profile',
+        );
+        expect(coordinator.syncCalls, 2);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  });
 }
 
 class _FakeAuthRepository extends AuthRepository {
@@ -421,6 +658,47 @@ class _FakeRideRepository extends RideRepository {
   }
 }
 
+enum _CoordinatorBehavior { noop, hangs }
+
+class _NoopPushMessagingService implements PushMessagingService {
+  @override
+  Future<bool> requestPermission() async => false;
+
+  @override
+  Future<String?> getToken() async => null;
+
+  @override
+  Stream<String> get onTokenRefresh => const Stream<String>.empty();
+}
+
+/// Doble del coordinador de push para los tests del splash: cuenta las
+/// invocaciones y puede simular un cuelgue para verificar que la
+/// navegación del splash no depende de él.
+class _FakePushRegistrationCoordinator extends PushRegistrationCoordinator {
+  _FakePushRegistrationCoordinator({
+    this.behavior = _CoordinatorBehavior.noop,
+  }) : super(
+         _NoopPushMessagingService(),
+         DeviceIdStore(const FlutterSecureStorage()),
+         PushRegistrationRepository(Dio()),
+       );
+
+  final _CoordinatorBehavior behavior;
+  int syncCalls = 0;
+
+  @override
+  Future<void> syncDeviceRegistration() async {
+    syncCalls += 1;
+
+    switch (behavior) {
+      case _CoordinatorBehavior.noop:
+        return;
+      case _CoordinatorBehavior.hangs:
+        await Completer<void>().future;
+    }
+  }
+}
+
 GoRouter _splashRouter() {
   return GoRouter(
     initialLocation: '/splash',
@@ -460,6 +738,7 @@ Future<void> _pumpSplash(
   required AuthRepository authRepository,
   required PassengerProfileRepository profileRepository,
   required RideRepository rideRepository,
+  PushRegistrationCoordinator? coordinator,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -467,6 +746,12 @@ Future<void> _pumpSplash(
         authRepositoryProvider.overrideWithValue(authRepository),
         passengerProfileRepositoryProvider.overrideWithValue(profileRepository),
         rideRepositoryProvider.overrideWithValue(rideRepository),
+        // El coordinador real toca FirebaseMessaging.instance, que no
+        // existe en flutter_test. Se reemplaza por un doble no-op
+        // salvo que el test quiera otro comportamiento.
+        pushRegistrationCoordinatorProvider.overrideWithValue(
+          coordinator ?? _FakePushRegistrationCoordinator(),
+        ),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),

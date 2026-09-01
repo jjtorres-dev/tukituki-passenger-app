@@ -24,11 +24,26 @@ dependencies:
   # GPS / ubicación del dispositivo
   geolocator: ^14.0.3
 
+  # Push notifications (PASSENGER-PUSH-R1, Etapa 1: init + registro de
+  # dispositivo). firebase_messaging >= 14.7.0 es lo que hace que
+  # requestPermission() dispare el diálogo POST_NOTIFICATIONS en
+  # Android 13+, sin necesidad de permission_handler.
+  firebase_core: ^3.15.0
+  firebase_messaging: ^15.2.0
+
+  # Promovido de dependencia transitiva a directa: se usa para generar
+  # el device_id estable por instalación (DeviceIdStore).
+  uuid: ^4.6.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
+
+  # PASSENGER-PUSH-R1: usado directamente por device_id_store_test.dart
+  # (FlutterSecureStoragePlatform.instance / TestFlutterSecureStoragePlatform).
+  flutter_secure_storage_platform_interface: ^2.0.3
 
 flutter:
   uses-material-design: true

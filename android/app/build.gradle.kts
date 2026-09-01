@@ -6,6 +6,10 @@ plugins {
     // The Flutter Gradle Plugin must be applied
     // after the Android plugin.
     id("dev.flutter.flutter-gradle-plugin")
+
+    // PASSENGER-PUSH-R1: procesa android/app/google-services.json
+    // (archivo real fuera de git, ver android/app/google-services.json.example).
+    id("com.google.gms.google-services")
 }
 
 val localProperties = Properties()

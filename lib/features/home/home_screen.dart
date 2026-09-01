@@ -27,6 +27,7 @@ import '../ride/data/ride_repository.dart';
 import '../ride/domain/fare_amount.dart';
 import '../ride/domain/payment_method.dart';
 import '../ride/domain/ride_history_item.dart';
+import '../notifications/data/push_registration_coordinator.dart';
 import '../ride/presentation/payment_method_picker_sheet.dart';
 import 'domain/offer_fare_result.dart';
 import 'domain/search_destination_result.dart';
@@ -462,6 +463,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _locating = false;
   bool _loading = false;
   bool _requestingRide = false;
+
+  /// PASSENGER-PUSH-R1 (fix): el registro del dispositivo push se
+  /// dispara desde aquí (no desde `SplashScreen`) cuando la sesión
+  /// resuelve a `/home`, recién después de que `_loadCurrentLocation()`
+  /// terminó de resolver el permiso de ubicación — así los dos diálogos
+  /// nativos de permiso (ubicación y notificaciones) nunca compiten.
+  /// Una sola vez por vida de este `State`: no se resetea. El
+  /// coordinador es idempotente igual, pero esto evita re-disparar en
+  /// cada tap del botón de recentrar (que también corre el `finally`
+  /// de `_loadCurrentLocation`).
+  bool _pushRegistrationRequested = false;
 
   FareEstimate? _quote;
 
@@ -978,6 +990,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         setState(() {
           _locating = false;
         });
+
+        // PASSENGER-PUSH-R1 (fix): el permiso de ubicación ya se
+        // resolvió (concedido, denegado, servicio apagado o error —
+        // `finally` corre en todos los caminos salvo el early-return
+        // por `_locating`, que ya tiene otra llamada en vuelo que
+        // llegará hasta aquí). Recién ahora es seguro pedir el permiso
+        // de notificaciones sin que los dos diálogos nativos compitan.
+        // El guard lo limita a una vez por vida del `State`.
+        if (!_pushRegistrationRequested) {
+          _pushRegistrationRequested = true;
+          unawaited(
+            ref
+                .read(pushRegistrationCoordinatorProvider)
+                .syncDeviceRegistration()
+                .catchError((Object error) {
+                  debugPrint(
+                    'PASSENGER PUSH - syncDeviceRegistration inesperado: $error',
+                  );
+                }),
+          );
+        }
       }
     }
   }

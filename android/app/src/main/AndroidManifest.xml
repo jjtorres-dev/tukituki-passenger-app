@@ -10,6 +10,12 @@
     <uses-permission
         android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- PASSENGER-PUSH-R1: requerido para mostrar notificaciones push en
+         Android 13+ (targetSdk 36). Se solicita en runtime vía
+         FirebaseMessaging.requestPermission(). -->
+    <uses-permission
+        android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="TukiTuki Pasajero"
         android:name="${applicationName}"
