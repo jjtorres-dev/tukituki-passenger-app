@@ -11,10 +11,15 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:passenger/core/theme/passenger_colors.dart';
 import 'package:passenger/core/widgets/tuki_search_bar.dart';
+import 'package:passenger/features/auth/data/auth_repository.dart';
 import 'package:passenger/features/fare/data/fare_repository.dart';
 import 'package:passenger/features/fare/domain/fare_estimate.dart';
 import 'package:passenger/features/home/home_screen.dart';
 import 'package:passenger/features/home/offer_fare_screen.dart';
+import 'package:passenger/features/home/profile_menu_drawer.dart';
+import 'package:passenger/features/passenger/data/passenger_profile_repository.dart';
+import 'package:passenger/features/passenger/domain/passenger_profile.dart';
+import 'package:passenger/features/passenger/presentation/edit_profile_screen.dart';
 import 'package:passenger/features/places/data/places_repository.dart';
 import 'package:passenger/features/places/domain/place_details.dart';
 import 'package:passenger/features/places/domain/place_prediction.dart';
@@ -66,7 +71,7 @@ void main() {
         PassengerColors.verdeMarca,
       );
       expect(tester.getTopLeft(find.byType(GoogleMap)).dy, 24);
-      expect(tester.getTopLeft(find.byTooltip('Cerrar sesión')).dy, 38);
+      expect(tester.getTopLeft(find.byTooltip('Abrir menú')).dy, 38);
 
       final systemUiRegion = tester
           .widget<AnnotatedRegion<SystemUiOverlayStyle>>(
@@ -1101,7 +1106,7 @@ void main() {
         expect(cardRect.right, mapRect.right - 20);
         expect(
           cardRect.top,
-          greaterThan(tester.getBottomLeft(find.byTooltip('Cerrar sesión')).dy),
+          greaterThan(tester.getBottomLeft(find.byTooltip('Abrir menú')).dy),
         );
         expect(map.padding.top, closeTo(cardRect.bottom - mapRect.top, 0.01));
         expect(map.padding.bottom, greaterThan(0));
@@ -1831,6 +1836,190 @@ void main() {
       await _flushAsync(tester);
     });
   });
+
+  group('PROFILE-MENU-R1', () {
+    testWidgets(
+      'el botón de 3 rayas abre el menú de perfil (ya no desloguea directo)',
+      (tester) async {
+        final authRepository = _FakeAuthRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          authRepository: authRepository,
+        );
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ProfileMenuDrawer), findsOneWidget);
+        expect(find.byType(HomeScreen), findsOneWidget);
+        expect(authRepository.logoutCalls, 0);
+        // Cabecera con el perfil que cargó `initState`.
+        expect(find.text('Ana Ruiz'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '"Cerrar sesión" abre el diálogo de confirmación; "Cancelar" no '
+      'desloguea y deja al pasajero en Home',
+      (tester) async {
+        final authRepository = _FakeAuthRepository();
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          authRepository: authRepository,
+        );
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('profile-menu-logout')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text('¿Cerrar sesión?'), findsOneWidget);
+
+        await tester.tap(find.text('Cancelar'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(HomeScreen), findsOneWidget);
+        expect(authRepository.logoutCalls, 0);
+      },
+    );
+
+    testWidgets(
+      'confirmar el logout llama a authRepository.logout() y navega a /login',
+      (tester) async {
+        final authRepository = _FakeAuthRepository();
+
+        await _pumpHomeScreenWithLoginRoute(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          authRepository: authRepository,
+        );
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('profile-menu-logout')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Cerrar sesión'));
+        await tester.pumpAndSettle();
+
+        expect(authRepository.logoutCalls, 1);
+        expect(find.text('LOGIN_DESTINATION'), findsOneWidget);
+      },
+    );
+
+    testWidgets('tocar la cabecera navega a "Editar perfil"', (tester) async {
+      await _pumpHomeScreen(
+        tester,
+        fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+        rideRepository: _FakeRideRepository(),
+      );
+
+      await tester.tap(find.byTooltip('Abrir menú'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('profile-menu-header')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(EditProfileScreen), findsOneWidget);
+      expect(find.byType(ProfileMenuDrawer), findsNothing);
+    });
+
+    testWidgets(
+      'volver de "Editar perfil" con un perfil nuevo refresca la cabecera del '
+      'menú',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+        );
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+        expect(find.text('Ana Ruiz'), findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('profile-menu-header')));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextFormField).first, 'Carlos');
+        await tester.pump();
+        await tester.tap(
+          find.byKey(const ValueKey('edit-profile-save-button')),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(HomeScreen), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+        expect(find.text('Carlos Ruiz'), findsOneWidget);
+        expect(find.text('Ana Ruiz'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'si falla la carga del perfil, Home no se rompe y el menú ofrece '
+      '"Reintentar"',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          passengerProfileRepository: _FakePassengerProfileRepository(
+            getError: Exception('sin conexión'),
+          ),
+        );
+
+        expect(find.byType(HomeScreen), findsOneWidget);
+        final dynamic state = tester.state(find.byType(HomeScreen));
+        expect(state.debugProfileLoadFailed, isTrue);
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ProfileMenuDrawer), findsOneWidget);
+        expect(find.text('No pudimos cargar tu perfil'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('profile-menu-retry')),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'con el drawer abierto, el botón de retroceso de Android lo cierra sin '
+      'salir de Home',
+      (tester) async {
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+        );
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+        expect(find.byType(ProfileMenuDrawer), findsOneWidget);
+
+        // Botón de retroceso del sistema — mismo mecanismo que el test
+        // de "back con destino elegido" de HOME-FLOW-R1.
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+
+        // El drawer cerrado se desmonta (drawerEnableOpenDragGesture:
+        // false), y Home sigue montado: el back no navegó a ningún lado.
+        expect(find.byType(ProfileMenuDrawer), findsNothing);
+        expect(find.byType(HomeScreen), findsOneWidget);
+      },
+    );
+  });
 }
 
 // FARE-PANEL-R1 (Etapa 2): la oferta se ajusta con el stepper −/+, ya
@@ -1922,6 +2111,8 @@ Future<void> _pumpHomeScreen(
   required RideRepository rideRepository,
   PlacesRepository? placesRepository,
   PaymentPreferenceRepository? paymentPreferenceRepository,
+  PassengerProfileRepository? passengerProfileRepository,
+  AuthRepository? authRepository,
   List<Position>? locationSequence,
   _FakeGeolocatorPlatform? geolocatorPlatform,
   MediaQueryData? mediaQueryData,
@@ -1938,6 +2129,11 @@ Future<void> _pumpHomeScreen(
         paymentPreferenceRepositoryProvider.overrideWithValue(
           paymentPreferenceRepository ?? _FakePaymentPreferenceRepository(),
         ),
+        passengerProfileRepositoryProvider.overrideWithValue(
+          passengerProfileRepository ?? _FakePassengerProfileRepository(),
+        ),
+        if (authRepository != null)
+          authRepositoryProvider.overrideWithValue(authRepository),
         if (placesRepository != null)
           placesRepositoryProvider.overrideWithValue(placesRepository),
       ],
@@ -1946,6 +2142,50 @@ Future<void> _pumpHomeScreen(
             ? const HomeScreen()
             : MediaQuery(data: mediaQueryData, child: const HomeScreen()),
       ),
+    ),
+  );
+
+  await _flushAsync(tester);
+}
+
+/// Igual que `_pumpHomeScreen` pero dentro de un `GoRouter` real con
+/// `/home` y `/login`, para los tests del menú de perfil que verifican
+/// la navegación del logout (`context.go('/login')`).
+Future<void> _pumpHomeScreenWithLoginRoute(
+  WidgetTester tester, {
+  required FareRepository fareRepository,
+  required RideRepository rideRepository,
+  required AuthRepository authRepository,
+  PassengerProfileRepository? passengerProfileRepository,
+}) async {
+  GeolocatorPlatform.instance = _FakeGeolocatorPlatform();
+
+  final router = GoRouter(
+    initialLocation: '/home',
+    routes: [
+      GoRoute(path: '/home', builder: (context, state) => const HomeScreen()),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) =>
+            const Scaffold(body: Text('LOGIN_DESTINATION')),
+      ),
+    ],
+  );
+
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        fareRepositoryProvider.overrideWithValue(fareRepository),
+        rideRepositoryProvider.overrideWithValue(rideRepository),
+        paymentPreferenceRepositoryProvider.overrideWithValue(
+          _FakePaymentPreferenceRepository(),
+        ),
+        passengerProfileRepositoryProvider.overrideWithValue(
+          passengerProfileRepository ?? _FakePassengerProfileRepository(),
+        ),
+        authRepositoryProvider.overrideWithValue(authRepository),
+      ],
+      child: MaterialApp.router(routerConfig: router),
     ),
   );
 
@@ -1979,6 +2219,9 @@ Future<void> _pumpRoutedHomeScreen(
         rideRepositoryProvider.overrideWithValue(rideRepository),
         paymentPreferenceRepositoryProvider.overrideWithValue(
           paymentPreferenceRepository ?? _FakePaymentPreferenceRepository(),
+        ),
+        passengerProfileRepositoryProvider.overrideWithValue(
+          _FakePassengerProfileRepository(),
         ),
       ],
       child: MaterialApp.router(routerConfig: router),
@@ -2260,6 +2503,67 @@ class _FakePaymentPreferenceRepository extends PaymentPreferenceRepository {
   Future<void> write(PaymentMethod method) async {
     _method = method;
     writes.add(method);
+  }
+}
+
+class _FakePassengerProfileRepository extends PassengerProfileRepository {
+  _FakePassengerProfileRepository({
+    Map<String, dynamic>? profileJson,
+    this.getError,
+  }) : profileJson =
+           profileJson ??
+           {
+             'firstName': 'Ana',
+             'lastName': 'Ruiz',
+             'ratingAverage': '4.80',
+             'ratingCount': 12,
+           },
+       super(Dio());
+
+  Map<String, dynamic>? profileJson;
+  Object? getError;
+
+  int getCalls = 0;
+  int updateCalls = 0;
+
+  @override
+  Future<Map<String, dynamic>?> getMyProfile() async {
+    getCalls++;
+    final error = getError;
+    if (error != null) {
+      throw error;
+    }
+    return profileJson;
+  }
+
+  @override
+  Future<PassengerProfile> updateMyProfile({
+    String? firstName,
+    String? lastName,
+  }) async {
+    updateCalls++;
+    // El backend persiste el cambio: `getMyProfile` posterior (el
+    // refresh del menú al reabrir) devuelve el nombre nuevo.
+    final json = Map<String, dynamic>.from(profileJson ?? const {});
+    if (firstName != null) {
+      json['firstName'] = firstName;
+    }
+    if (lastName != null) {
+      json['lastName'] = lastName;
+    }
+    profileJson = json;
+    return PassengerProfile.fromJson(json);
+  }
+}
+
+class _FakeAuthRepository extends AuthRepository {
+  _FakeAuthRepository() : super(Dio(), const FlutterSecureStorage());
+
+  int logoutCalls = 0;
+
+  @override
+  Future<void> logout() async {
+    logoutCalls++;
   }
 }
 

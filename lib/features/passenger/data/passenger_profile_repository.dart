@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../domain/passenger_profile.dart';
 
 final passengerProfileRepositoryProvider =
     Provider<PassengerProfileRepository>((ref) {
@@ -54,5 +55,35 @@ class PassengerProfileRepository {
     }
 
     return data;
+  }
+
+  /// PATCH `passengers/me` — el backend ya soporta
+  /// `UpdatePassengerProfileDto` (todos los campos opcionales). Solo se
+  /// envían los campos no nulos: un `null` significa "no lo toques", no
+  /// "bórralo". No toca `createMyProfile` (alta) ni `getMyProfile`
+  /// (lectura, consumida por el resolver de sesión).
+  Future<PassengerProfile> updateMyProfile({
+    String? firstName,
+    String? lastName,
+  }) async {
+    final body = <String, dynamic>{
+      'firstName': ?firstName,
+      'lastName': ?lastName,
+    };
+
+    final response = await _dio.patch<Map<String, dynamic>>(
+      'passengers/me',
+      data: body,
+    );
+
+    final data = response.data;
+
+    if (data == null) {
+      throw Exception(
+        'El backend devolvió una respuesta vacía.',
+      );
+    }
+
+    return PassengerProfile.fromJson(data);
   }
 }

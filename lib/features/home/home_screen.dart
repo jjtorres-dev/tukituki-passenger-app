@@ -19,6 +19,9 @@ import '../../core/widgets/tuki_search_bar.dart';
 import '../auth/data/auth_repository.dart';
 import '../fare/data/fare_repository.dart';
 import '../fare/domain/fare_estimate.dart';
+import '../passenger/data/passenger_profile_repository.dart';
+import '../passenger/domain/passenger_profile.dart';
+import '../passenger/presentation/edit_profile_screen.dart';
 import '../ride/data/payment_preference_repository.dart';
 import '../ride/data/ride_repository.dart';
 import '../ride/domain/fare_amount.dart';
@@ -30,6 +33,7 @@ import 'domain/search_destination_result.dart';
 import 'domain/short_address_label.dart';
 import 'domain/suggested_destinations.dart';
 import 'offer_fare_screen.dart';
+import 'profile_menu_drawer.dart';
 import 'search_destination_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -419,6 +423,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// antes de que resolviera.
   bool _paymentMethodTouched = false;
 
+  /// PROFILE-MENU-R1: el menú de perfil es el `Drawer` del `Scaffold`
+  /// de Home. Esta key permite abrirlo/cerrarlo por código
+  /// (`_openProfileMenu` / los helpers `_handle*FromMenu`), ya que el
+  /// `context` de `_HomeScreenState` está por encima del `Scaffold` y
+  /// `Scaffold.of` no lo alcanzaría.
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  /// PROFILE-MENU-R1: perfil del pasajero para la cabecera del menú de
+  /// perfil. Se carga en `initState` sin bloquear el primer frame
+  /// (mismo patrón no-bloqueante que `_loadPaymentMethod` /
+  /// `_loadSuggestedDestinations`) y se refresca en cada apertura del
+  /// menú. `null` mientras carga o si falló; el menú funciona igual.
+  PassengerProfile? _profile;
+  bool _profileLoading = false;
+  bool _profileLoadFailed = false;
+
+  /// Solo para tests: verificar que Home siguió el estado de carga del
+  /// perfil (una falla no debe romper Home ni el menú). Mismo criterio
+  /// que `debugQuoteId` / `debugRouteFitScheduleGeneration`.
+  @visibleForTesting
+  bool get debugProfileLoading => _profileLoading;
+
+  @visibleForTesting
+  bool get debugProfileLoadFailed => _profileLoadFailed;
+
+  @visibleForTesting
+  PassengerProfile? get debugProfile => _profile;
+
   /*
    * Puntos decodificados de la polyline
    * devuelta por Google Routes.
@@ -472,6 +504,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // FARE-PANEL-R1: método de pago recordado del viaje anterior.
     unawaited(_loadPaymentMethod());
+
+    // PROFILE-MENU-R1: perfil para la cabecera del menú de perfil.
+    unawaited(_loadProfile());
   }
 
   Future<void> _loadPaymentMethod() async {
@@ -486,6 +521,135 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     setState(() {
       _paymentMethod = stored;
     });
+  }
+
+  /// PROFILE-MENU-R1: (re)carga el perfil del pasajero para la cabecera
+  /// del menú. Se usa `unawaited` en `initState` y como `loader` de
+  /// `ProfileMenuSheet` (por eso devuelve el `PassengerProfile?`, no
+  /// `void`) — así un "Reintentar" dentro de la hoja también deja el
+  /// estado de Home fresco. Nunca bloquea nada: en error hace
+  /// `debugPrint` y marca `_profileLoadFailed` (convención del repo).
+  Future<PassengerProfile?> _loadProfile() async {
+    if (mounted) {
+      setState(() {
+        _profileLoading = true;
+      });
+    }
+
+    try {
+      final data = await ref
+          .read(passengerProfileRepositoryProvider)
+          .getMyProfile();
+
+      final profile = data == null ? null : PassengerProfile.fromJson(data);
+
+      if (mounted) {
+        setState(() {
+          _profileLoading = false;
+          if (profile != null) {
+            _profile = profile;
+            _profileLoadFailed = false;
+          } else if (_profile == null) {
+            _profileLoadFailed = true;
+          }
+        });
+      }
+
+      return profile;
+    } catch (error) {
+      debugPrint('PROFILE-MENU-R1: no se pudo cargar el perfil: $error');
+
+      if (mounted) {
+        setState(() {
+          _profileLoading = false;
+          if (_profile == null) {
+            _profileLoadFailed = true;
+          }
+        });
+      }
+
+      return null;
+    }
+  }
+
+  /// Abre el menú de perfil (botón de 3 rayas): despliega el `Drawer`
+  /// desde el borde izquierdo. Solo por tap — nunca por swipe
+  /// (`drawerEnableOpenDragGesture: false` en el `Scaffold`), para no
+  /// competir con el `EagerGestureRecognizer` del `GoogleMap`.
+  void _openProfileMenu() {
+    _scaffoldKey.currentState?.openDrawer();
+  }
+
+  /// Cierra el drawer y navega a "Editar perfil".
+  void _handleEditProfileFromMenu() {
+    _scaffoldKey.currentState?.closeDrawer();
+    _openEditProfile();
+  }
+
+  /// Cierra el drawer y pide confirmación antes del logout real.
+  void _handleLogoutFromMenu() {
+    _scaffoldKey.currentState?.closeDrawer();
+    _confirmLogout();
+  }
+
+  /// Confirmación antes del logout real. `AlertDialog` estándar — el
+  /// sistema de diseño todavía no define un componente de diálogo
+  /// (`sistema-de-diseno.md` §8), validar visualmente. Si el pasajero
+  /// confirma, llama al `_logout()` ya existente sin tocarlo.
+  Future<void> _confirmLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('¿Cerrar sesión?'),
+          content: const Text('¿Seguro que quieres cerrar sesión?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text(
+                'Cerrar sesión',
+                style: TextStyle(color: PassengerColors.error),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await _logout();
+    }
+  }
+
+  /// Navega a "Editar perfil". Solo se llama con `_profile != null` (la
+  /// cabecera del menú no es tocable si el perfil no cargó). Si vuelve
+  /// con un perfil actualizado, Home lo adopta para que la cabecera
+  /// quede fresca en la siguiente apertura del menú.
+  Future<void> _openEditProfile() async {
+    final profile = _profile;
+    if (profile == null) {
+      return;
+    }
+
+    final updated = await Navigator.of(context).push<PassengerProfile>(
+      MaterialPageRoute(
+        builder: (_) => EditProfileScreen(
+          initialFirstName: profile.firstName,
+          initialLastName: profile.lastName,
+        ),
+      ),
+    );
+
+    if (updated != null && mounted) {
+      setState(() {
+        _profile = updated;
+        _profileLoadFailed = false;
+      });
+    }
   }
 
   Future<void> _openPaymentMethodPicker() async {
@@ -1841,8 +2005,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         systemStatusBarContrastEnforced: false,
       ),
       child: Scaffold(
+        key: _scaffoldKey,
         backgroundColor: PassengerColors.crema,
         resizeToAvoidBottomInset: true,
+        // Abre SOLO por tap del botón de 3 rayas (`_openProfileMenu`);
+        // el swipe desde el borde competiría con el
+        // `EagerGestureRecognizer` del `GoogleMap`.
+        drawerEnableOpenDragGesture: false,
+        drawer: ProfileMenuDrawer(
+          initialProfile: _profile,
+          loader: _loadProfile,
+          onEditProfile: _handleEditProfileFromMenu,
+          onLogout: _handleLogoutFromMenu,
+        ),
         body: Column(
           children: [
             SizedBox(
@@ -2256,8 +2431,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ],
       ),
       child: IconButton(
-        tooltip: 'Cerrar sesión',
-        onPressed: _logout,
+        tooltip: 'Abrir menú',
+        onPressed: _openProfileMenu,
         padding: EdgeInsets.zero,
         color: PassengerColors.textoPrimario,
         icon: const Icon(Icons.menu),
