@@ -66,7 +66,7 @@ void main() {
       messages.add(
         _message(
           data: {
-            'route': 'ride-detail',
+            'screen': 'ride-detail',
             'rideId': 'r1',
             'eventType': 'DRIVER_ARRIVED',
           },
@@ -93,7 +93,7 @@ void main() {
 
       messages.add(
         _message(
-          data: {'route': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
+          data: {'screen': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
           withNotification: false,
         ),
       );
@@ -115,7 +115,7 @@ void main() {
       build().start();
 
       messages.add(
-        _message(data: {'route': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'}),
+        _message(data: {'screen': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'}),
       );
       await pumpEventQueue();
 
@@ -137,7 +137,7 @@ void main() {
       messages.add(
         _message(
           data: {
-            'route': 'ride-receipt',
+            'screen': 'ride-receipt',
             'rideId': 'r1',
             'status': 'COMPLETED',
           },
@@ -161,7 +161,7 @@ void main() {
 
       messages.add(
         _message(
-          data: {'route': 'ride-receipt', 'status': 'COMPLETED'},
+          data: {'screen': 'ride-receipt', 'status': 'COMPLETED'},
           withNotification: false,
         ),
       );
@@ -182,7 +182,7 @@ void main() {
 
     messages.add(
       _message(
-        data: {'route': 'ride-detail', 'eventType': 'DRIVER_ARRIVING'},
+        data: {'screen': 'ride-detail', 'eventType': 'DRIVER_ARRIVING'},
         title: 'Tu conductor está en camino',
         body: 'x',
       ),
@@ -197,7 +197,7 @@ void main() {
 
     messages.add(
       _message(
-        data: {'route': 'ride-rating', 'rideId': 'r1'},
+        data: {'screen': 'ride-rating', 'rideId': 'r1'},
         title: 'Califica tu viaje',
         body: 'x',
       ),
@@ -213,12 +213,12 @@ void main() {
     'RIDE_CANCELLED',
     'RIDE_EXPIRED',
   ]) {
-    test('$eventType (route ride-detail) → show() NO llamado', () async {
+    test('$eventType (screen ride-detail) → show() NO llamado', () async {
       build().start();
 
       messages.add(
         _message(
-          data: {'route': 'ride-detail', 'eventType': eventType},
+          data: {'screen': 'ride-detail', 'eventType': eventType},
           title: 'x',
           body: 'y',
         ),
@@ -229,7 +229,7 @@ void main() {
     });
   }
 
-  test('route y eventType ausentes → show() NO llamado, sin excepción', () async {
+  test('screen y eventType ausentes → show() NO llamado, sin excepción', () async {
     build().start();
 
     messages.add(_message(data: {'rideId': 'r1'}, title: 'x', body: 'y'));
@@ -254,13 +254,13 @@ void main() {
 
       messages.add(
         _message(
-          data: {'route': 'ride-receipt', 'status': 'COMPLETED'},
+          data: {'screen': 'ride-receipt', 'status': 'COMPLETED'},
           title: 'Viaje completado',
           body: 'Tarifa: S/ 9.00',
         ),
       );
       messages.add(
-        _message(data: {'route': 'ride-rating', 'rideId': 'r1'}, title: 'x'),
+        _message(data: {'screen': 'ride-rating', 'rideId': 'r1'}, title: 'x'),
       );
       await pumpEventQueue();
 
@@ -276,11 +276,11 @@ void main() {
       build().start();
 
       messages.add(
-        _message(data: {'route': 'ride-rating', 'rideId': 'r1'}, title: 'x'),
+        _message(data: {'screen': 'ride-rating', 'rideId': 'r1'}, title: 'x'),
       );
       messages.add(
         _message(
-          data: {'route': 'ride-receipt', 'status': 'COMPLETED'},
+          data: {'screen': 'ride-receipt', 'status': 'COMPLETED'},
           title: 'Viaje completado',
           body: 'Tarifa: S/ 9.00',
         ),
@@ -300,14 +300,14 @@ void main() {
 
       messages.add(
         _message(
-          data: {'route': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
+          data: {'screen': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
           title: 'Tu conductor llegó',
           body: 'a',
         ),
       );
       messages.add(
         _message(
-          data: {'route': 'ride-receipt', 'status': 'COMPLETED'},
+          data: {'screen': 'ride-receipt', 'status': 'COMPLETED'},
           title: 'Viaje completado',
           body: 'b',
         ),
@@ -324,13 +324,13 @@ void main() {
 
   test(
     'precedencia defensiva: eventType DRIVER_ARRIVED gana sobre '
-    'route ride-receipt',
+    'screen ride-receipt',
     () async {
       build().start();
 
       messages.add(
         _message(
-          data: {'route': 'ride-receipt', 'eventType': 'DRIVER_ARRIVED'},
+          data: {'screen': 'ride-receipt', 'eventType': 'DRIVER_ARRIVED'},
           title: 'T',
           body: 'B',
         ),
@@ -350,7 +350,7 @@ void main() {
 
     messages.add(
       _message(
-        data: {'route': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
+        data: {'screen': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
         title: 'A',
         body: 'B',
       ),
@@ -370,7 +370,7 @@ void main() {
 
       messages.add(
         _message(
-          data: {'route': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
+          data: {'screen': 'ride-detail', 'eventType': 'DRIVER_ARRIVED'},
           title: 'A',
           body: 'B',
         ),
@@ -391,7 +391,7 @@ void main() {
     // Sigue vivo: un evento válido posterior se procesa igual.
     messages.add(
       _message(
-        data: {'route': 'ride-receipt', 'status': 'COMPLETED'},
+        data: {'screen': 'ride-receipt', 'status': 'COMPLETED'},
         title: 'ok',
         body: 'sigue vivo',
       ),

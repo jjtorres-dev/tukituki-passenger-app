@@ -33,6 +33,34 @@ Stream<RemoteMessage> _firebaseOnMessage() {
   }
 }
 
+/// Filtro compartido de eventos push del viaje: `data.eventType ==
+/// 'DRIVER_ARRIVED'` O `data.screen == 'ride-receipt'` (RIDE_COMPLETED).
+/// `screen` por sí solo NO sirve de filtro (es genérico, compartido por
+/// varios eventos). Se chequea `eventType` primero por si un mensaje
+/// trajera ambos campos.
+///
+/// El campo se llama `screen` (no `route`): el backend lo renombró para
+/// eliminar la colisión con `EXTRA_INITIAL_ROUTE` del embedding de
+/// Flutter en Android, que al abrir la app desde una notificación con
+/// el proceso terminado inyectaba ese valor como `initialRoute` y
+/// go_router no podía resolverlo ("no routes for location").
+///
+/// Lo usan `PushMessageHandler` (Etapa 2, aviso en foreground) y
+/// `coldStartReceiptRouteFor` (Etapa 3, tap con la app terminada).
+RideUpdateKind? resolveRideUpdateKind(RemoteMessage message) {
+  final data = message.data;
+
+  if (data['eventType'] == 'DRIVER_ARRIVED') {
+    return RideUpdateKind.driverArrived;
+  }
+
+  if (data['screen'] == 'ride-receipt') {
+    return RideUpdateKind.rideCompleted;
+  }
+
+  return null;
+}
+
 /// `PASSENGER-PUSH-R1` (Etapa 2). Hermana de
 /// `PushRegistrationCoordinator` (no la extiende ni la modifica):
 /// materializa en la barra de estado las `RemoteMessage` que llegan
@@ -40,7 +68,7 @@ Stream<RemoteMessage> _firebaseOnMessage() {
 /// por su cuenta.
 ///
 /// Solo reacciona a dos eventos: `DRIVER_ARRIVED` (por
-/// `data.eventType`) y `RIDE_COMPLETED` (por `data.route`). Cualquier
+/// `data.eventType`) y `RIDE_COMPLETED` (por `data.screen`). Cualquier
 /// otro mensaje se recibe y se ignora con `debugPrint` — en particular
 /// `DRIVER_ARRIVING` y `RATING_REQUEST`, decisión de producto de esta
 /// etapa (un solo aviso por fin de viaje).
@@ -84,33 +112,15 @@ class PushMessageHandler {
     }
   }
 
-  /// Filtro de la Etapa 2: `data.eventType == 'DRIVER_ARRIVED'` O
-  /// `data.route == 'ride-receipt'`. `route` por sí solo NO sirve de
-  /// filtro (es genérico, compartido por varios eventos). Se chequea
-  /// `eventType` primero por si un mensaje trajera ambos campos.
-  RideUpdateKind? _resolveKind(RemoteMessage message) {
-    final data = message.data;
-
-    if (data['eventType'] == 'DRIVER_ARRIVED') {
-      return RideUpdateKind.driverArrived;
-    }
-
-    if (data['route'] == 'ride-receipt') {
-      return RideUpdateKind.rideCompleted;
-    }
-
-    return null;
-  }
-
   void _handleMessage(RemoteMessage message) {
     try {
-      final kind = _resolveKind(message);
+      final kind = resolveRideUpdateKind(message);
 
       if (kind == null) {
-        final route = message.data['route'];
+        final screen = message.data['screen'];
         final eventType = message.data['eventType'];
         debugPrint(
-          'PASSENGER PUSH - mensaje ignorado (route=$route, '
+          'PASSENGER PUSH - mensaje ignorado (screen=$screen, '
           'eventType=$eventType)',
         );
         return;
@@ -135,4 +145,38 @@ class PushMessageHandler {
     _subscription?.cancel();
     _subscription = null;
   }
+}
+
+/// `PASSENGER-PUSH-R1` (Etapa 3). `main()` lo sobreescribe con el
+/// `RemoteMessage` de cold start (o `null`) leído una sola vez con
+/// `FirebaseMessaging.instance.getInitialMessage()`. El default `null`
+/// es seguro y esperado: en tests y en un arranque normal (sin tap de
+/// notificación con la app terminada) no hay desvío de navegación, y
+/// `SplashScreen._checkSession` sigue su resolución de sesión habitual.
+final initialPushMessageProvider = Provider<RemoteMessage?>((ref) => null);
+
+/// `PASSENGER-PUSH-R1` (Etapa 3). Pura: sin `BuildContext`, sin
+/// Firebase. Decide si un `getInitialMessage()` de cold start debe
+/// desviar la navegación al recibo del viaje.
+///
+/// Devuelve la ruta del recibo SOLO si el mensaje inicial es
+/// `RIDE_COMPLETED`, trae un `rideId` usable y no hay un viaje activo
+/// más nuevo (`hasNewerActiveRide`, que siempre gana — se navega ahí).
+/// `DRIVER_ARRIVED` → `null` (el resolver de sesión ya lleva a
+/// `/ride/:rideId` en background y cold start). `RATING_REQUEST`
+/// (`screen: 'ride-rating'`, no navegable) y cualquier otro evento →
+/// `null` → cae al resolver normal, nunca un `context.go(data['screen'])`
+/// genérico.
+String? coldStartReceiptRouteFor({
+  required RemoteMessage? initialMessage,
+  required bool hasNewerActiveRide,
+}) {
+  if (initialMessage == null) return null;
+  if (resolveRideUpdateKind(initialMessage) != RideUpdateKind.rideCompleted) {
+    return null;
+  }
+  if (hasNewerActiveRide) return null;
+  final rideId = initialMessage.data['rideId'];
+  if (rideId is! String || rideId.trim().isEmpty) return null;
+  return '/ride/${rideId.trim()}/receipt';
 }

@@ -20,7 +20,7 @@ enum RideUpdateKind {
   /// El conductor llegó al origen (`data.eventType == 'DRIVER_ARRIVED'`).
   driverArrived,
 
-  /// El viaje terminó (`data.route == 'ride-receipt'`).
+  /// El viaje terminó (`data.screen == 'ride-receipt'`).
   rideCompleted;
 
   /// ID de notificación **por evento** (no fijo, a diferencia del

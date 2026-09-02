@@ -9,9 +9,23 @@ import '../../features/home/home_screen.dart';
 import '../../features/passenger/presentation/complete_profile_screen.dart';
 import '../../features/ride/presentation/ride_searching_screen.dart';
 import '../../features/ride/presentation/ride_receipt_screen.dart';
+import 'route_not_found_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/splash',
+  // Red de seguridad: cualquier ruta que go_router no pueda resolver
+  // (p. ej. una notificación push que abre la app cerrada con una ruta
+  // inválida) cae en una pantalla con salida real — nunca en el
+  // ErrorScreen por defecto, cuyo botón "Home" apunta a `/`, que no
+  // existe en esta app, y deja al usuario atrapado.
+  errorBuilder: (context, state) {
+    debugPrint(
+      'PASSENGER ROUTER - ruta no encontrada: "${state.uri}" '
+      '(${state.error})',
+    );
+
+    return const RouteNotFoundScreen();
+  },
   routes: [
     GoRoute(
       path: '/splash',

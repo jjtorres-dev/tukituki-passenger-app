@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -10,6 +11,7 @@ import 'package:passenger/features/auth/data/auth_repository.dart';
 import 'package:passenger/features/auth/domain/public_user.dart';
 import 'package:passenger/features/auth/presentation/splash_screen.dart';
 import 'package:passenger/features/notifications/data/device_id_store.dart';
+import 'package:passenger/features/notifications/data/push_message_handler.dart';
 import 'package:passenger/features/notifications/data/push_messaging_service.dart';
 import 'package:passenger/features/notifications/data/push_registration_coordinator.dart';
 import 'package:passenger/features/notifications/data/push_registration_repository.dart';
@@ -591,6 +593,255 @@ void main() {
       },
     );
   });
+
+  group('PASSENGER-PUSH-R1 (Etapa 3): cold start al recibo', () {
+    testWidgets(
+      'a) tap de RIDE_COMPLETED con la app terminada y sin viaje activo → '
+      'siembra /home y apila el recibo; el back del recibo vuelve a /home',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: true),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: const {'id': 'profile-1'},
+        );
+        final rideRepository = _FakeRideRepository();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          initialPushMessage: _initialMessage(const {
+            'screen': 'ride-receipt',
+            'rideId': 'r9',
+            'status': 'COMPLETED',
+          }),
+        );
+
+        // El recibo queda arriba de /home. Se verifica por la pila real
+        // del delegate y por la pantalla visible: `pushReplacement` +
+        // `push` componen `[/home, recibo]` en el navigator, aunque
+        // go_router no actualice `routeInformationProvider` en un push
+        // imperativo (solo lo hace `go`) — irrelevante en móvil (sin
+        // barra de URL) y el back sí usa la pila del navigator.
+        expect(
+          router.routerDelegate.currentConfiguration.matches
+              .map((m) => m.matchedLocation)
+              .toList(),
+          ['/home', '/ride/r9/receipt'],
+        );
+        expect(find.text('RECEIPT_DESTINATION r9'), findsOneWidget);
+        expect(find.text('HOME_DESTINATION'), findsNothing);
+
+        // Pila bien formada: el back del recibo cae en /home, no cierra
+        // la app.
+        final context = tester.element(find.text('RECEIPT_DESTINATION r9'));
+        expect(Navigator.of(context).canPop(), isTrue);
+
+        router.pop();
+        await tester.pumpAndSettle();
+
+        expect(
+          router.routerDelegate.currentConfiguration.matches
+              .map((m) => m.matchedLocation)
+              .toList(),
+          ['/home'],
+        );
+        expect(find.text('HOME_DESTINATION'), findsOneWidget);
+        expect(find.text('RECEIPT_DESTINATION r9'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'b) tap de RIDE_COMPLETED pero hay un viaje activo más nuevo → gana '
+      'el viaje activo, no el recibo viejo',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: true),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: const {'id': 'profile-1'},
+        );
+        final rideRepository = _FakeRideRepository(activeRide: _ride());
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          initialPushMessage: _initialMessage(const {
+            'screen': 'ride-receipt',
+            'rideId': 'r9',
+          }),
+        );
+
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          '/ride/ride-active',
+        );
+        expect(find.text('RIDE_DESTINATION ride-active'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'c) tap de RIDE_COMPLETED pero el perfil está incompleto → el desvío '
+      'se suprime, va a /complete-profile (nunca se salta el gate de '
+      'identidad)',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: false),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: null,
+        );
+        final rideRepository = _FakeRideRepository();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          initialPushMessage: _initialMessage(const {
+            'screen': 'ride-receipt',
+            'rideId': 'r9',
+          }),
+        );
+
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          '/complete-profile',
+        );
+        expect(find.text('PROFILE_DESTINATION'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'd) tap de RIDE_COMPLETED sin sesión → nunca llega al branch, va a '
+      '/login',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(hasSessionValue: false);
+        final profileRepository = _FakePassengerProfileRepository();
+        final rideRepository = _FakeRideRepository();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          initialPushMessage: _initialMessage(const {
+            'screen': 'ride-receipt',
+            'rideId': 'r9',
+          }),
+        );
+
+        expect(router.routeInformationProvider.value.uri.path, '/login');
+        expect(rideRepository.getActiveRideCalls, 0);
+      },
+    );
+
+    testWidgets(
+      'e) tap de DRIVER_ARRIVED no dispara el desvío (lo cubre el resolver '
+      'de sesión) → va a /home cuando no hay viaje activo',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: true),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: const {'id': 'profile-1'},
+        );
+        final rideRepository = _FakeRideRepository();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          initialPushMessage: _initialMessage(const {
+            'screen': 'ride-detail',
+            'rideId': 'r9',
+            'eventType': 'DRIVER_ARRIVED',
+          }),
+        );
+
+        expect(router.routeInformationProvider.value.uri.path, '/home');
+        expect(find.text('HOME_DESTINATION'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'f) tap de RATING_REQUEST (screen ride-rating, no navegable) no '
+      'dispara el desvío → cae al resolver normal, /home',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: true),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: const {'id': 'profile-1'},
+        );
+        final rideRepository = _FakeRideRepository();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+          initialPushMessage: _initialMessage(const {
+            'screen': 'ride-rating',
+            'rideId': 'r9',
+          }),
+        );
+
+        expect(router.routeInformationProvider.value.uri.path, '/home');
+        expect(find.text('HOME_DESTINATION'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'g) sin initialMessage (arranque normal) el splash se comporta '
+      'exactamente como hoy → /home',
+      (tester) async {
+        final authRepository = _FakeAuthRepository(
+          user: _user(isPhoneVerified: true),
+        );
+        final profileRepository = _FakePassengerProfileRepository(
+          profile: const {'id': 'profile-1'},
+        );
+        final rideRepository = _FakeRideRepository();
+        final router = _splashRouter();
+        addTearDown(router.dispose);
+
+        await _pumpSplash(
+          tester,
+          router: router,
+          authRepository: authRepository,
+          profileRepository: profileRepository,
+          rideRepository: rideRepository,
+        );
+
+        expect(router.routeInformationProvider.value.uri.path, '/home');
+        expect(find.text('HOME_DESTINATION'), findsOneWidget);
+      },
+    );
+  });
 }
 
 class _FakeAuthRepository extends AuthRepository {
@@ -723,6 +974,12 @@ GoRouter _splashRouter() {
             const Scaffold(body: Text('PROFILE_DESTINATION')),
       ),
       GoRoute(
+        path: '/ride/:rideId/receipt',
+        builder: (context, state) => Scaffold(
+          body: Text('RECEIPT_DESTINATION ${state.pathParameters['rideId']}'),
+        ),
+      ),
+      GoRoute(
         path: '/ride/:rideId',
         builder: (context, state) => Scaffold(
           body: Text('RIDE_DESTINATION ${state.pathParameters['rideId']}'),
@@ -739,6 +996,7 @@ Future<void> _pumpSplash(
   required PassengerProfileRepository profileRepository,
   required RideRepository rideRepository,
   PushRegistrationCoordinator? coordinator,
+  RemoteMessage? initialPushMessage,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -752,6 +1010,10 @@ Future<void> _pumpSplash(
         pushRegistrationCoordinatorProvider.overrideWithValue(
           coordinator ?? _FakePushRegistrationCoordinator(),
         ),
+        // PASSENGER-PUSH-R1 (Etapa 3): en producción lo sobreescribe
+        // `main()` con `getInitialMessage()`. Por defecto null (arranque
+        // normal, sin tap de notificación con la app terminada).
+        initialPushMessageProvider.overrideWithValue(initialPushMessage),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
@@ -759,6 +1021,12 @@ Future<void> _pumpSplash(
 
   await tester.pump(const Duration(milliseconds: 801));
   await _flushSplash(tester);
+}
+
+/// `RemoteMessage` mínimo para simular el `getInitialMessage()` de un
+/// cold start por tap de notificación.
+RemoteMessage _initialMessage(Map<String, dynamic> data) {
+  return RemoteMessage(data: data);
 }
 
 Future<void> _flushSplash(WidgetTester tester) async {

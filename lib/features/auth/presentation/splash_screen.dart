@@ -169,7 +169,36 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
           sessionState.kind == PassengerSessionKind.ready &&
           sessionState.activeRideId == null;
 
-      context.go(routeForPassengerSessionState(sessionState));
+      // PASSENGER-PUSH-R1 (Etapa 3): cold start por tap de una
+      // notificación RIDE_COMPLETED con la app terminada. El resolver
+      // normal mandaría a `/home`; si hay sesión lista (perfil
+      // presente) y NO hay un viaje activo más nuevo, sembramos
+      // `/home` y apilamos el recibo encima, para que el botón de
+      // volver del recibo lleve a Home en vez de cerrar la app.
+      // `coldStartReceiptRouteFor` devuelve `null` para DRIVER_ARRIVED
+      // (lo cubre el resolver) y para RATING_REQUEST / cualquier otro
+      // evento.
+      //
+      // Las dos llamadas van en el mismo bloque síncrono, sin `await`
+      // / `Future.microtask` / `addPostFrameCallback` entre medio, para
+      // que no haya flash visible de Home. Se usa `pushReplacement`
+      // (no `go`) para la primera: en go_router 17 un `go` se resuelve
+      // de forma asíncrona y descarta un `push` hecho en el mismo
+      // bloque; `pushReplacement` + `push` son operaciones síncronas
+      // sobre el delegate y componen la pila `[/home, recibo]` en el
+      // mismo frame.
+      final coldStartReceiptRoute = coldStartReceiptRouteFor(
+        initialMessage: ref.read(initialPushMessageProvider),
+        hasNewerActiveRide: activeRide != null,
+      );
+
+      if (coldStartReceiptRoute != null &&
+          sessionState.kind == PassengerSessionKind.ready) {
+        context.pushReplacement('/home');
+        context.push(coldStartReceiptRoute);
+      } else {
+        context.go(routeForPassengerSessionState(sessionState));
+      }
 
       // PASSENGER-PUSH-R1 (Etapa 2): arranca el handler que muestra el
       // aviso local cuando llega un `DRIVER_ARRIVED` / `RIDE_COMPLETED`
