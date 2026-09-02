@@ -41,6 +41,11 @@ android {
 
         targetCompatibility =
             JavaVersion.VERSION_17
+
+        // PASSENGER-PUSH-R1 (Etapa 2): flutter_local_notifications usa
+        // APIs de java.time; el desugaring las hace disponibles en
+        // minSdk < 26.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -77,6 +82,13 @@ kotlin {
             org.jetbrains.kotlin.gradle.dsl
                 .JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    // PASSENGER-PUSH-R1 (Etapa 2): requerido por flutter_local_notifications
+    // junto con isCoreLibraryDesugaringEnabled. Si el build de AGP pide
+    // otra versión, ajustar a la que indique el error.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 flutter {

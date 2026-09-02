@@ -31,6 +31,13 @@ dependencies:
   firebase_core: ^3.15.0
   firebase_messaging: ^15.2.0
 
+  # Push notifications (PASSENGER-PUSH-R1, Etapa 2: sonido + aviso
+  # visible con la app en foreground). Materializa en la barra de
+  # estado las RemoteMessage que llegan con la app abierta (único caso
+  # donde FCM no dibuja nada por su cuenta). Requiere
+  # coreLibraryDesugaring en android/app/build.gradle.kts.
+  flutter_local_notifications: ^22.3.0
+
   # Promovido de dependencia transitiva a directa: se usa para generar
   # el device_id estable por instalación (DeviceIdStore).
   uuid: ^4.6.0

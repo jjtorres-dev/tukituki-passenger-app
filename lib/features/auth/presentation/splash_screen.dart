@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../notifications/data/push_message_handler.dart';
 import '../../notifications/data/push_registration_coordinator.dart';
 import '../../passenger/data/passenger_profile_repository.dart';
 import '../../ride/data/ride_repository.dart';
@@ -169,6 +170,23 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
           sessionState.activeRideId == null;
 
       context.go(routeForPassengerSessionState(sessionState));
+
+      // PASSENGER-PUSH-R1 (Etapa 2): arranca el handler que muestra el
+      // aviso local cuando llega un `DRIVER_ARRIVED` / `RIDE_COMPLETED`
+      // con la app en foreground. Va AFUERA del `if (!goesToHome)` de
+      // abajo: `start()` es una suscripción síncrona a un stream, no
+      // pide ningún permiso, así que no hay carrera con el diálogo de
+      // ubicación de `/home` (a diferencia de `syncDeviceRegistration`,
+      // que sí pide el permiso de notificaciones). Es idempotente y
+      // best-effort; el try/catch es defensa extra por si algún cambio
+      // futuro rompe el contrato "nunca lanza".
+      try {
+        ref.read(pushMessageHandlerProvider).start();
+      } catch (error) {
+        debugPrint(
+          'PASSENGER PUSH - PushMessageHandler.start() falló: $error',
+        );
+      }
 
       // PASSENGER-PUSH-R1 (Etapa 1): registro del dispositivo push,
       // solo con sesión válida. Best-effort y sin `await` — no debe
