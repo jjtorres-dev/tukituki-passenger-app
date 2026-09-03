@@ -652,6 +652,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         builder: (_) => EditProfileScreen(
           initialFirstName: profile.firstName,
           initialLastName: profile.lastName,
+          initialEmail: profile.email,
+          initialPhoneE164: profile.phoneE164,
         ),
       ),
     );

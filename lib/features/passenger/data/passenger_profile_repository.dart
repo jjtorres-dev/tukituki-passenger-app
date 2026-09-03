@@ -16,6 +16,13 @@ class PassengerProfileRepository {
 
   final Dio _dio;
 
+  /// Centinela para distinguir "no toques el correo" (parámetro
+  /// omitido) de "borra el correo" (`email: null` explícito). Un
+  /// `String?` no alcanza: `null` sería ambiguo entre ambos. La clave
+  /// `email` solo viaja en el body cuando el llamador pasó algo
+  /// distinto de este centinela.
+  static const Object _emailUnchanged = Object();
+
   Future<Map<String, dynamic>?> getMyProfile() async {
     try {
       final response =
@@ -58,18 +65,29 @@ class PassengerProfileRepository {
   }
 
   /// PATCH `passengers/me` — el backend ya soporta
-  /// `UpdatePassengerProfileDto` (todos los campos opcionales). Solo se
-  /// envían los campos no nulos: un `null` significa "no lo toques", no
-  /// "bórralo". No toca `createMyProfile` (alta) ni `getMyProfile`
-  /// (lectura, consumida por el resolver de sesión).
+  /// `UpdatePassengerProfileDto` (todos los campos opcionales). Para
+  /// `firstName`/`lastName` se usa el patrón null-aware: un `null` (o
+  /// ausente) significa "no lo toques" y la clave ni siquiera viaja.
+  ///
+  /// `email` es distinto: además de "no lo toques" (parámetro omitido →
+  /// centinela) tiene que poder expresar "bórralo" (`email: null`
+  /// explícito → clave `email` con valor `null` en el body, que el
+  /// backend interpreta como limpiar el campo). No toca `createMyProfile`
+  /// (alta) ni `getMyProfile` (lectura, consumida por el resolver de
+  /// sesión).
   Future<PassengerProfile> updateMyProfile({
     String? firstName,
     String? lastName,
+    Object? email = _emailUnchanged,
   }) async {
     final body = <String, dynamic>{
       'firstName': ?firstName,
       'lastName': ?lastName,
     };
+
+    if (!identical(email, _emailUnchanged)) {
+      body['email'] = email;
+    }
 
     final response = await _dio.patch<Map<String, dynamic>>(
       'passengers/me',

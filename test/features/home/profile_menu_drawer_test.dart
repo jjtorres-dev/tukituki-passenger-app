@@ -186,6 +186,8 @@ PassengerProfile _profile({
   return PassengerProfile(
     firstName: firstName,
     lastName: lastName,
+    email: null,
+    phoneE164: '+51987654321',
     ratingAverage: ratingAverage,
     ratingCount: ratingCount,
   );

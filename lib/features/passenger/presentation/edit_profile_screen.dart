@@ -31,10 +31,19 @@ class EditProfileScreen extends ConsumerStatefulWidget {
     super.key,
     required this.initialFirstName,
     required this.initialLastName,
+    required this.initialEmail,
+    required this.initialPhoneE164,
   });
 
   final String initialFirstName;
   final String initialLastName;
+
+  /// Correo actual del pasajero, o `null` si todavía no cargó uno.
+  final String? initialEmail;
+
+  /// Teléfono actual (E.164). Se muestra como solo lectura — no se
+  /// puede editar desde esta pantalla.
+  final String initialPhoneE164;
 
   @override
   ConsumerState<EditProfileScreen> createState() => _EditProfileScreenState();
@@ -47,15 +56,20 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   late final TextEditingController _lastNameController = TextEditingController(
     text: widget.initialLastName,
   );
+  late final TextEditingController _emailController = TextEditingController(
+    text: widget.initialEmail ?? '',
+  );
 
   bool _loading = false;
   String? _firstNameError;
   String? _lastNameError;
+  String? _emailError;
 
   @override
   void dispose() {
     _firstNameController.dispose();
     _lastNameController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
@@ -90,18 +104,47 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     return null;
   }
 
+  // Validación laxa a propósito: nunca debe rechazar algo que el
+  // Backend (`@IsEmail()`) sí aceptaría — el Backend es la fuente de
+  // verdad del formato. Vacío es válido (el campo es opcional); si hay
+  // algo, solo se atrapan typos evidentes (falta `@`, sin punto en el
+  // dominio, espacios) y el tope de 255 caracteres del Backend.
+  static final RegExp _laxEmailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+
+  String? _validateEmail(String value) {
+    final text = value.trim();
+
+    if (text.isEmpty) {
+      return null;
+    }
+
+    if (text.length > 255) {
+      return 'Máximo 255 caracteres';
+    }
+
+    if (!_laxEmailPattern.hasMatch(text)) {
+      return 'Ingresa un correo válido';
+    }
+
+    return null;
+  }
+
   bool get _formValid =>
       _validateFirstName(_firstNameController.text) == null &&
-      _validateLastName(_lastNameController.text) == null;
+      _validateLastName(_lastNameController.text) == null &&
+      _validateEmail(_emailController.text) == null;
 
   void _handleFieldChanged() {
     // Feedback en vivo del estado del botón (mismo criterio que
     // `OfferFareScreen` con `_amountValid`). Solo se limpia un error ya
     // visible; no se muestra uno nuevo hasta intentar guardar.
-    if (_firstNameError != null || _lastNameError != null) {
+    if (_firstNameError != null ||
+        _lastNameError != null ||
+        _emailError != null) {
       setState(() {
         _firstNameError = _validateFirstName(_firstNameController.text);
         _lastNameError = _validateLastName(_lastNameController.text);
+        _emailError = _validateEmail(_emailController.text);
       });
     } else {
       setState(() {});
@@ -111,23 +154,30 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   Future<void> _save() async {
     final firstNameError = _validateFirstName(_firstNameController.text);
     final lastNameError = _validateLastName(_lastNameController.text);
+    final emailError = _validateEmail(_emailController.text);
 
     setState(() {
       _firstNameError = firstNameError;
       _lastNameError = lastNameError;
+      _emailError = emailError;
     });
 
-    if (firstNameError != null || lastNameError != null) {
+    if (firstNameError != null || lastNameError != null || emailError != null) {
       return;
     }
 
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
 
+    final emailNow = _emailController.text.trim();
+    final emailInitial = (widget.initialEmail ?? '').trim();
+    final emailChanged = emailNow != emailInitial;
+
     // Sin cambios reales → no se llama al backend, se vuelve sin
     // resultado (Home conserva el perfil que ya tenía).
     if (firstName == widget.initialFirstName.trim() &&
-        lastName == widget.initialLastName.trim()) {
+        lastName == widget.initialLastName.trim() &&
+        !emailChanged) {
       Navigator.pop(context, null);
       return;
     }
@@ -138,10 +188,22 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       _loading = true;
     });
 
+    final repository = ref.read(passengerProfileRepositoryProvider);
+
     try {
-      final PassengerProfile updated = await ref
-          .read(passengerProfileRepositoryProvider)
-          .updateMyProfile(firstName: firstName, lastName: lastName);
+      // `email` solo se pasa si cambió: así el repo deja la clave fuera
+      // del body (centinela) cuando no se tocó, y manda `null` explícito
+      // cuando se vació un correo que tenía valor (= borrar en Backend).
+      final PassengerProfile updated = emailChanged
+          ? await repository.updateMyProfile(
+              firstName: firstName,
+              lastName: lastName,
+              email: emailNow.isEmpty ? null : emailNow,
+            )
+          : await repository.updateMyProfile(
+              firstName: firstName,
+              lastName: lastName,
+            );
 
       if (!mounted) {
         return;
@@ -252,6 +314,30 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     const SizedBox(
                       height: PassengerSpacing.espacioEntreCampos,
                     ),
+                    const _FieldLabel('Correo electrónico (opcional)'),
+                    const SizedBox(
+                      height: PassengerSpacing.espacioEtiquetaCampo,
+                    ),
+                    TukiTextField(
+                      controller: _emailController,
+                      hintText: 'juan@ejemplo.com',
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.done,
+                      errorText: _emailError,
+                      autofillHints: const [AutofillHints.email],
+                      onChanged: (_) => _handleFieldChanged(),
+                    ),
+                    const SizedBox(
+                      height: PassengerSpacing.espacioEntreCampos,
+                    ),
+                    const _FieldLabel('Número de celular'),
+                    const SizedBox(
+                      height: PassengerSpacing.espacioEtiquetaCampo,
+                    ),
+                    _ReadOnlyPhoneRow(phoneE164: widget.initialPhoneE164),
+                    const SizedBox(
+                      height: PassengerSpacing.espacioEntreCampos,
+                    ),
                   ],
                 ),
               ),
@@ -343,8 +429,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               if (!_formValid) ...[
                 const SizedBox(height: 8),
                 Text(
-                  'Ingresa nombres y apellidos (2 a 80 caracteres) para '
-                  'guardar.',
+                  'Revisa los datos: nombres y apellidos de 2 a 80 '
+                  'caracteres y, si cargas un correo, que tenga un formato '
+                  'válido.',
                   style: PassengerTypography.notaBotonInactivo.copyWith(
                     color: PassengerColors.textoSecundario,
                   ),
@@ -353,6 +440,69 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Fila de solo lectura para el número de celular.
+///
+/// NO es un campo editable a propósito: el teléfono es la identidad de
+/// login (`User.phoneE164`, único) y no se puede cambiar desde acá
+/// hasta que exista un flujo de reverificación (OTP-R3). Sin
+/// `TextField`, sin foco, sin `onTap` — solo texto dentro de un
+/// contenedor visualmente distinto de un campo activo (fondo `crema`,
+/// borde `bordeSuave`, candado) más una nota debajo.
+class _ReadOnlyPhoneRow extends StatelessWidget {
+  const _ReadOnlyPhoneRow({required this.phoneE164});
+
+  final String phoneE164;
+
+  @override
+  Widget build(BuildContext context) {
+    final display = phoneE164.trim().isEmpty ? 'No disponible' : phoneE164;
+
+    return Semantics(
+      label: 'Número de celular, no editable: $display',
+      readOnly: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            decoration: BoxDecoration(
+              color: PassengerColors.crema,
+              borderRadius: BorderRadius.circular(
+                PassengerSpacing.radioCampoBoton,
+              ),
+              border: Border.all(color: PassengerColors.bordeSuave),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    display,
+                    style: PassengerTypography.cuerpo.copyWith(
+                      color: PassengerColors.textoSecundario,
+                    ),
+                  ),
+                ),
+                const Icon(
+                  Icons.lock_outline,
+                  size: 16,
+                  color: PassengerColors.textoSecundario,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'No puedes cambiar tu número desde aquí.',
+            style: PassengerTypography.notaBotonInactivo.copyWith(
+              color: PassengerColors.textoSecundario,
+            ),
+          ),
+        ],
       ),
     );
   }

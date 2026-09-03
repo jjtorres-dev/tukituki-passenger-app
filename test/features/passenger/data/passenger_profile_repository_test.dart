@@ -48,6 +48,54 @@ void main() {
     expect(captured.data, <String, dynamic>{});
   });
 
+  test('updateMyProfile(email: ...) incluye esa clave con ese valor', () async {
+    late RequestOptions captured;
+    final repository = PassengerProfileRepository(
+      _dioReturning(_profileJson(), onRequest: (r) => captured = r),
+    );
+
+    await repository.updateMyProfile(email: 'a@b.com');
+
+    expect((captured.data as Map)['email'], 'a@b.com');
+  });
+
+  test('updateMyProfile(email: null) manda la clave email con valor null '
+      '(= borrar)', () async {
+    late RequestOptions captured;
+    final repository = PassengerProfileRepository(
+      _dioReturning(_profileJson(), onRequest: (r) => captured = r),
+    );
+
+    await repository.updateMyProfile(email: null);
+
+    final body = captured.data as Map;
+    expect(body.containsKey('email'), isTrue);
+    expect(body['email'], isNull);
+  });
+
+  test('updateMyProfile sin el parámetro email NO incluye la clave email '
+      '(centinela)', () async {
+    late RequestOptions captured;
+    final repository = PassengerProfileRepository(
+      _dioReturning(_profileJson(), onRequest: (r) => captured = r),
+    );
+
+    await repository.updateMyProfile(firstName: 'Ana');
+
+    expect((captured.data as Map).containsKey('email'), isFalse);
+  });
+
+  test('updateMyProfile parsea email y phoneE164 de la respuesta', () async {
+    final repository = PassengerProfileRepository(
+      _dioReturning(_profileJson()),
+    );
+
+    final profile = await repository.updateMyProfile(firstName: 'Ana');
+
+    expect(profile.email, 'ana@example.com');
+    expect(profile.phoneE164, '+51987654321');
+  });
+
   test('updateMyProfile lanza si el backend devuelve una respuesta vacía', () {
     final repository = PassengerProfileRepository(_dioReturning(null));
 
@@ -95,6 +143,8 @@ Map<String, dynamic> _profileJson() {
     'userId': 'user-1',
     'firstName': 'Ana María',
     'lastName': 'Ruiz Pérez',
+    'email': 'ana@example.com',
+    'phoneE164': '+51987654321',
     'photoUrl': null,
     'ratingAverage': '4.50',
     'ratingCount': 4,

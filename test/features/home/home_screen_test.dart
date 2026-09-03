@@ -2754,6 +2754,9 @@ class _FakePassengerProfileRepository extends PassengerProfileRepository {
            },
        super(Dio());
 
+  /// Centinela: distingue "no se pasó `email`" de "`email: null`".
+  static const Object _emailNotPassed = Object();
+
   Map<String, dynamic>? profileJson;
   Object? getError;
 
@@ -2774,6 +2777,7 @@ class _FakePassengerProfileRepository extends PassengerProfileRepository {
   Future<PassengerProfile> updateMyProfile({
     String? firstName,
     String? lastName,
+    Object? email = _emailNotPassed,
   }) async {
     updateCalls++;
     // El backend persiste el cambio: `getMyProfile` posterior (el
@@ -2784,6 +2788,9 @@ class _FakePassengerProfileRepository extends PassengerProfileRepository {
     }
     if (lastName != null) {
       json['lastName'] = lastName;
+    }
+    if (!identical(email, _emailNotPassed)) {
+      json['email'] = email;
     }
     profileJson = json;
     return PassengerProfile.fromJson(json);

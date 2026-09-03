@@ -8,6 +8,8 @@ void main() {
       'userId': 'user-1',
       'firstName': 'Juan José',
       'lastName': 'Torres Solano',
+      'email': 'juan@example.com',
+      'phoneE164': '+51987654321',
       'photoUrl': null,
       'emergencyContactName': null,
       'ratingAverage': '4.85',
@@ -18,9 +20,38 @@ void main() {
 
     expect(profile.firstName, 'Juan José');
     expect(profile.lastName, 'Torres Solano');
+    expect(profile.email, 'juan@example.com');
+    expect(profile.phoneE164, '+51987654321');
     expect(profile.ratingAverage, 4.85);
     expect(profile.ratingCount, 12);
     expect(profile.hasRating, isTrue);
+  });
+
+  test('email ausente en el JSON ⇒ null', () {
+    final profile = PassengerProfile.fromJson({
+      'firstName': 'Ana',
+      'lastName': 'Ruiz',
+    });
+
+    expect(profile.email, isNull);
+  });
+
+  test('email: null en el JSON ⇒ null', () {
+    final profile = PassengerProfile.fromJson({'email': null});
+
+    expect(profile.email, isNull);
+  });
+
+  test('email no-string en el JSON ⇒ null, sin lanzar', () {
+    final profile = PassengerProfile.fromJson({'email': 123});
+
+    expect(profile.email, isNull);
+  });
+
+  test('phoneE164 ausente ⇒ cadena vacía, sin lanzar', () {
+    final profile = PassengerProfile.fromJson({'firstName': 'Ana'});
+
+    expect(profile.phoneE164, '');
   });
 
   test('ratingCount > 0 ⇒ hasRating true; == 0 ⇒ false', () {

@@ -24,6 +24,32 @@ void main() {
     expect(harness.popped, isFalse);
   });
 
+  testWidgets('renderiza el correo precargado', (tester) async {
+    await _pump(tester, repository: _FakeRepo(), email: 'ana@ejemplo.com');
+
+    expect(
+      tester.widget<TextFormField>(_field('juan@ejemplo.com')).controller!.text,
+      'ana@ejemplo.com',
+    );
+  });
+
+  testWidgets(
+    'la fila de teléfono muestra el número y no es un campo editable',
+    (tester) async {
+      await _pump(
+        tester,
+        repository: _FakeRepo(),
+        phoneE164: '+51955555555',
+      );
+
+      expect(find.text('+51955555555'), findsOneWidget);
+      expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+      // Solo hay 3 campos de texto reales: nombres, apellidos, correo.
+      // El teléfono NO es un TukiTextField.
+      expect(find.byType(TukiTextField), findsNWidgets(3));
+    },
+  );
+
   testWidgets(
     'campo vacío deshabilita el botón, muestra la nota y no llama a la red',
     (tester) async {
@@ -50,6 +76,27 @@ void main() {
   );
 
   testWidgets(
+    'correo con formato inválido deshabilita el botón y no llama a la red',
+    (tester) async {
+      final repository = _FakeRepo();
+      await _pump(tester, repository: repository);
+
+      await tester.enterText(_field('juan@ejemplo.com'), 'no-es-un-correo');
+      await tester.pump();
+
+      final button = tester.widget<FilledButton>(
+        find.byKey(const ValueKey('edit-profile-save-button')),
+      );
+      expect(button.onPressed, isNull);
+      expect(find.textContaining('formato'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('edit-profile-save-button')));
+      await tester.pump();
+      expect(repository.calls, 0);
+    },
+  );
+
+  testWidgets(
     'guardado válido recorta espacios, llama una sola vez y hace pop con el '
     'perfil devuelto',
     (tester) async {
@@ -66,12 +113,67 @@ void main() {
       expect(repository.calls, 1);
       expect(repository.lastFirstName, 'Ana María');
       expect(repository.lastLastName, 'Ruiz Pérez');
+      // El correo no se tocó → el parámetro `email` no se pasa.
+      expect(repository.emailPassed, isFalse);
       expect(harness.popped, isTrue);
       expect(harness.result, isA<PassengerProfile>());
       expect(harness.result!.firstName, 'Ana María');
       expect(find.byType(EditProfileScreen), findsNothing);
     },
   );
+
+  testWidgets('editar solo el correo y guardar → updateMyProfile con el '
+      'valor nuevo', (tester) async {
+    final repository = _FakeRepo();
+    final harness = await _pump(tester, repository: repository);
+
+    await tester.enterText(_field('juan@ejemplo.com'), 'nuevo@x.com');
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('edit-profile-save-button')));
+    await tester.pumpAndSettle();
+
+    expect(repository.calls, 1);
+    expect(repository.emailPassed, isTrue);
+    expect(repository.lastEmail, 'nuevo@x.com');
+    expect(harness.popped, isTrue);
+  });
+
+  testWidgets('borrar un correo que tenía valor y guardar → updateMyProfile '
+      'con email: null', (tester) async {
+    final repository = _FakeRepo();
+    final harness = await _pump(
+      tester,
+      repository: repository,
+      email: 'viejo@x.com',
+    );
+
+    await tester.enterText(_field('juan@ejemplo.com'), '');
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('edit-profile-save-button')));
+    await tester.pumpAndSettle();
+
+    expect(repository.calls, 1);
+    expect(repository.emailPassed, isTrue);
+    expect(repository.lastEmail, isNull);
+    expect(harness.popped, isTrue);
+  });
+
+  testWidgets('cambiar solo el nombre (correo intacto) → updateMyProfile SIN '
+      'el parámetro email', (tester) async {
+    final repository = _FakeRepo();
+    await _pump(tester, repository: repository, email: 'ana@x.com');
+
+    await tester.enterText(_field('Juan José'), 'Nuevo Nombre');
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('edit-profile-save-button')));
+    await tester.pumpAndSettle();
+
+    expect(repository.calls, 1);
+    expect(repository.emailPassed, isFalse);
+  });
 
   testWidgets('guardar sin cambios hace pop(null) sin tocar la red', (
     tester,
@@ -86,6 +188,21 @@ void main() {
     expect(harness.popped, isTrue);
     expect(harness.result, isNull);
   });
+
+  testWidgets(
+    'correo vacío desde el inicio sin otros cambios → pop(null) sin red',
+    (tester) async {
+      final repository = _FakeRepo();
+      final harness = await _pump(tester, repository: repository, email: null);
+
+      await tester.tap(find.byKey(const ValueKey('edit-profile-save-button')));
+      await tester.pumpAndSettle();
+
+      expect(repository.calls, 0);
+      expect(harness.popped, isTrue);
+      expect(harness.result, isNull);
+    },
+  );
 
   testWidgets('mientras guarda, el botón queda deshabilitado (sin doble envío)', (
     tester,
@@ -199,6 +316,8 @@ Future<_Harness> _pump(
   required PassengerProfileRepository repository,
   String firstName = 'Ana',
   String lastName = 'Ruiz',
+  String? email,
+  String phoneE164 = '+51987654321',
 }) async {
   final harness = _Harness();
 
@@ -219,6 +338,8 @@ Future<_Harness> _pump(
                           builder: (_) => EditProfileScreen(
                             initialFirstName: firstName,
                             initialLastName: lastName,
+                            initialEmail: email,
+                            initialPhoneE164: phoneE164,
                           ),
                         ),
                       );
@@ -254,10 +375,18 @@ DioException _dioHttpError(int statusCode) {
 class _FakeRepo extends PassengerProfileRepository {
   _FakeRepo({this.error}) : super(Dio());
 
+  /// Centinela propio del fake para distinguir "no se pasó `email`" de
+  /// "se pasó `email: null`" — mismo motivo que el centinela real del
+  /// repositorio.
+  static const Object _notPassed = Object();
+
   final Object? error;
   int calls = 0;
   String? lastFirstName;
   String? lastLastName;
+
+  bool emailPassed = false;
+  Object? lastEmail;
 
   Completer<void>? _hold;
 
@@ -268,10 +397,13 @@ class _FakeRepo extends PassengerProfileRepository {
   Future<PassengerProfile> updateMyProfile({
     String? firstName,
     String? lastName,
+    Object? email = _notPassed,
   }) async {
     calls++;
     lastFirstName = firstName;
     lastLastName = lastName;
+    emailPassed = !identical(email, _notPassed);
+    lastEmail = emailPassed ? email : null;
 
     final hold = _hold;
     if (hold != null) {
@@ -286,6 +418,8 @@ class _FakeRepo extends PassengerProfileRepository {
     return PassengerProfile(
       firstName: firstName ?? 'Ana',
       lastName: lastName ?? 'Ruiz',
+      email: emailPassed ? email as String? : null,
+      phoneE164: '+51987654321',
       ratingAverage: 4.5,
       ratingCount: 3,
     );
