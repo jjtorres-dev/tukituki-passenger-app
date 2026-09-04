@@ -104,4 +104,26 @@ class PassengerProfileRepository {
 
     return PassengerProfile.fromJson(data);
   }
+
+  /// DELETE `passengers/me/photo` — desvincula la foto de perfil
+  /// (`photoObjectKey`/`photoUrl` quedan en `null` del lado del
+  /// backend, sin borrar el objeto del bucket). El backend responde con
+  /// el perfil completo actualizado (200), así que no hace falta un GET
+  /// extra. Idempotente: llamarlo sin foto cargada no lanza. Mismo
+  /// manejo de respuesta vacía que [updateMyProfile].
+  Future<PassengerProfile> removeMyPhoto() async {
+    final response = await _dio.delete<Map<String, dynamic>>(
+      'passengers/me/photo',
+    );
+
+    final data = response.data;
+
+    if (data == null) {
+      throw Exception(
+        'El backend devolvió una respuesta vacía.',
+      );
+    }
+
+    return PassengerProfile.fromJson(data);
+  }
 }

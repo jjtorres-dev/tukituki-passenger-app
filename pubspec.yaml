@@ -18,6 +18,11 @@ dependencies:
   go_router: ^17.4.0
   flutter_secure_storage: 10.3.1
 
+  # Selección de foto de perfil (cámara / galería). Misma versión que
+  # tukituki-driver-app. No requiere declarar permisos en el manifest
+  # de Android para este uso — confirmado con el conductor.
+  image_picker: ^1.2.3
+
   # Google Maps
   google_maps_flutter: ^2.18.0
 

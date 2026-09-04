@@ -111,6 +111,58 @@ void main() {
     );
   });
 
+  test('removeMyPhoto hace DELETE a passengers/me/photo y parsea la '
+      'respuesta', () async {
+    late RequestOptions captured;
+    final repository = PassengerProfileRepository(
+      _dioReturning(
+        _profileJson()..['photoUrl'] = null,
+        onRequest: (r) => captured = r,
+      ),
+    );
+
+    final profile = await repository.removeMyPhoto();
+
+    expect(captured.method, 'DELETE');
+    expect(captured.path, 'passengers/me/photo');
+    expect(profile.photoUrl, isNull);
+    expect(profile.firstName, 'Ana María');
+  });
+
+  test('removeMyPhoto lanza si el backend devuelve una respuesta vacía', () {
+    final repository = PassengerProfileRepository(_dioReturning(null));
+
+    expect(
+      () => repository.removeMyPhoto(),
+      throwsA(
+        isA<Exception>().having(
+          (e) => e.toString(),
+          'mensaje',
+          contains('respuesta vacía'),
+        ),
+      ),
+    );
+  });
+
+  test('removeMyPhoto propaga DioException', () {
+    final repository = PassengerProfileRepository(
+      _dioRejecting(
+        DioException(
+          requestOptions: RequestOptions(path: 'passengers/me/photo'),
+          response: Response<void>(
+            requestOptions: RequestOptions(path: 'passengers/me/photo'),
+            statusCode: 500,
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      () => repository.removeMyPhoto(),
+      throwsA(isA<DioException>()),
+    );
+  });
+
   test('updateMyProfile propaga DioException (p. ej. 400 de validación)', () {
     final repository = PassengerProfileRepository(
       _dioRejecting(

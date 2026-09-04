@@ -2749,6 +2749,7 @@ class _FakePassengerProfileRepository extends PassengerProfileRepository {
            {
              'firstName': 'Ana',
              'lastName': 'Ruiz',
+             'photoUrl': null,
              'ratingAverage': '4.80',
              'ratingCount': 12,
            },

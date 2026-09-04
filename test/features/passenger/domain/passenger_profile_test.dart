@@ -10,7 +10,7 @@ void main() {
       'lastName': 'Torres Solano',
       'email': 'juan@example.com',
       'phoneE164': '+51987654321',
-      'photoUrl': null,
+      'photoUrl': 'https://backend.tukituki/storage/avatars/passenger/1?token=x',
       'emergencyContactName': null,
       'ratingAverage': '4.85',
       'ratingCount': 12,
@@ -22,9 +22,38 @@ void main() {
     expect(profile.lastName, 'Torres Solano');
     expect(profile.email, 'juan@example.com');
     expect(profile.phoneE164, '+51987654321');
+    expect(
+      profile.photoUrl,
+      'https://backend.tukituki/storage/avatars/passenger/1?token=x',
+    );
     expect(profile.ratingAverage, 4.85);
     expect(profile.ratingCount, 12);
     expect(profile.hasRating, isTrue);
+  });
+
+  test('photoUrl ausente en el JSON ⇒ null', () {
+    final profile = PassengerProfile.fromJson({
+      'firstName': 'Ana',
+      'lastName': 'Ruiz',
+    });
+
+    expect(profile.photoUrl, isNull);
+  });
+
+  test('photoUrl: null en el JSON ⇒ null', () {
+    expect(PassengerProfile.fromJson({'photoUrl': null}).photoUrl, isNull);
+  });
+
+  test('photoUrl no-string en el JSON ⇒ null, sin lanzar', () {
+    expect(PassengerProfile.fromJson({'photoUrl': 42}).photoUrl, isNull);
+  });
+
+  test('photoUrl presente ⇒ el valor tal cual', () {
+    final profile = PassengerProfile.fromJson({
+      'photoUrl': 'https://cdn.example/p.jpg',
+    });
+
+    expect(profile.photoUrl, 'https://cdn.example/p.jpg');
   });
 
   test('email ausente en el JSON ⇒ null', () {

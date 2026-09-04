@@ -188,6 +188,7 @@ PassengerProfile _profile({
     lastName: lastName,
     email: null,
     phoneE164: '+51987654321',
+    photoUrl: null,
     ratingAverage: ratingAverage,
     ratingCount: ratingCount,
   );

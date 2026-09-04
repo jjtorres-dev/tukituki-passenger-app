@@ -3,11 +3,12 @@
 /// Campos que consume la app hoy (cabecera del menú de perfil y
 /// pantalla "Editar perfil"): `firstName`, `lastName`, `email`
 /// (opcional, puede ser `null`), `phoneE164` (solo lectura en la app —
-/// se muestra pero no se edita) y la calificación
-/// (`ratingAverage`/`ratingCount`). El backend
+/// se muestra pero no se edita), `photoUrl` (opcional, puede ser
+/// `null`; URL estable que resuelve el backend, ver `passenger_avatar.dart`)
+/// y la calificación (`ratingAverage`/`ratingCount`). El backend
 /// (`PassengerProfileResponseDto`) expone además `id`, `userId`,
-/// `photoUrl`, `emergencyContact*` y timestamps — se omiten a
-/// propósito: si un checkpoint futuro los necesita, se agregan acá.
+/// `emergencyContact*` y timestamps — se omiten a propósito: si un
+/// checkpoint futuro los necesita, se agregan acá.
 ///
 /// Parseo defensivo por convención del repo (`assigned_driver.dart`,
 /// `passenger_ride_offer.dart`): nunca asume tipos exactos del backend
@@ -18,6 +19,7 @@ class PassengerProfile {
     required this.lastName,
     required this.email,
     required this.phoneE164,
+    required this.photoUrl,
     required this.ratingAverage,
     required this.ratingCount,
   });
@@ -35,6 +37,13 @@ class PassengerProfile {
   /// `User` del lado del backend, no en el perfil, pero llega en la
   /// misma respuesta de `passengers/me`. Solo lectura en la app.
   final String phoneE164;
+
+  /// URL de la foto de perfil, o `null` si el pasajero todavía no cargó
+  /// una. La resuelve el backend en cada lectura (URL estable del propio
+  /// backend con capability token, ver STORAGE-R2.1); la app solo la
+  /// consume, nunca la construye. Mismo parseo defensivo que `email`:
+  /// un valor no-string se trata como ausente.
+  final String? photoUrl;
 
   /// Promedio de calificación como número. El backend lo manda como
   /// string (`"4.85"`, `"0.00"`); acá ya viene parseado con
@@ -55,6 +64,7 @@ class PassengerProfile {
       lastName: json['lastName']?.toString() ?? '',
       email: _toNullableString(json['email']),
       phoneE164: json['phoneE164']?.toString() ?? '',
+      photoUrl: _toNullableString(json['photoUrl']),
       ratingAverage: _toDouble(json['ratingAverage']),
       ratingCount: _toInt(json['ratingCount']),
     );
