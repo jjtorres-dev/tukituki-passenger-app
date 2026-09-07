@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:passenger/features/home/profile_menu_drawer.dart';
 import 'package:passenger/features/passenger/domain/passenger_profile.dart';
+import 'package:passenger/features/passenger/presentation/passenger_avatar.dart';
 
 void main() {
   testWidgets(
@@ -175,11 +176,132 @@ void main() {
     expect(find.text('No pudimos cargar tu perfil'), findsNothing);
     expect(find.byKey(const ValueKey('profile-menu-header')), findsOneWidget);
   });
+
+  // --- PROFILE-PHOTO-2c: avatar de la cabecera ------------------------
+
+  testWidgets('perfil con photoUrl: la cabecera muestra un Image con esa '
+      'URL', (tester) async {
+    const url = 'https://cdn.example/ana.jpg';
+    final profile = _profile(
+      photoUrl: url,
+      ratingAverage: 4.0,
+      ratingCount: 3,
+    );
+
+    await _pump(
+      tester,
+      initialProfile: profile,
+      loader: () async => profile,
+    );
+
+    final avatar = tester.widget<PassengerAvatar>(
+      find.descendant(
+        of: find.byKey(const ValueKey('profile-menu-header')),
+        matching: find.byType(PassengerAvatar),
+      ),
+    );
+    expect(avatar.photoUrl, url);
+    expect(avatar.diameter, 40);
+    expect(_networkImage(url), findsOneWidget);
+  });
+
+  testWidgets('perfil sin photoUrl: ícono genérico, igual que antes del '
+      'cambio (sin Image)', (tester) async {
+    final profile = _profile(ratingAverage: 4.0, ratingCount: 3); // photoUrl null
+
+    await _pump(
+      tester,
+      initialProfile: profile,
+      loader: () async => profile,
+    );
+
+    expect(
+      tester
+          .widget<PassengerAvatar>(
+            find.descendant(
+              of: find.byKey(const ValueKey('profile-menu-header')),
+              matching: find.byType(PassengerAvatar),
+            ),
+          )
+          .photoUrl,
+      isNull,
+    );
+    expect(find.byType(Image), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(PassengerAvatar),
+        matching: find.byIcon(Icons.person),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('perfil con photoUrl vacío: cae al ícono genérico (sin Image)', (
+    tester,
+  ) async {
+    final profile = _profile(
+      photoUrl: '',
+      ratingAverage: 4.0,
+      ratingCount: 3,
+    );
+
+    await _pump(
+      tester,
+      initialProfile: profile,
+      loader: () async => profile,
+    );
+
+    expect(find.byType(Image), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(PassengerAvatar),
+        matching: find.byIcon(Icons.person),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('estado fallido: PassengerAvatar con ícono genérico, sin '
+      'romperse', (tester) async {
+    await _pump(
+      tester,
+      initialProfile: null,
+      loader: () async => null, // falla / 404, sin cache
+    );
+
+    expect(find.text('No pudimos cargar tu perfil'), findsOneWidget);
+    expect(find.byType(PassengerAvatar), findsOneWidget);
+    expect(find.byType(Image), findsNothing);
+    expect(find.byIcon(Icons.person), findsOneWidget);
+  });
+
+  testWidgets('estado cargando: PassengerAvatar con ícono genérico, sin '
+      'romperse', (tester) async {
+    final gate = Completer<void>();
+
+    await _pump(
+      tester,
+      initialProfile: null,
+      loader: () async {
+        await gate.future;
+        return _profile(ratingAverage: 4.0, ratingCount: 3);
+      },
+    );
+
+    expect(find.text('Cargando tu perfil…'), findsOneWidget);
+    expect(find.byType(PassengerAvatar), findsOneWidget);
+    expect(find.byType(Image), findsNothing);
+    expect(find.byIcon(Icons.person), findsOneWidget);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+  });
 }
 
 PassengerProfile _profile({
   String firstName = 'Ana',
   String lastName = 'Ruiz',
+  String? photoUrl,
   required double ratingAverage,
   required int ratingCount,
 }) {
@@ -188,11 +310,16 @@ PassengerProfile _profile({
     lastName: lastName,
     email: null,
     phoneE164: '+51987654321',
-    photoUrl: null,
+    photoUrl: photoUrl,
     ratingAverage: ratingAverage,
     ratingCount: ratingCount,
   );
 }
+
+/// Encuentra un `Image` cuyo `NetworkImage` apunta exactamente a [url].
+Finder _networkImage(String url) => find.byWidgetPredicate(
+  (w) => w is Image && w.image is NetworkImage && (w.image as NetworkImage).url == url,
+);
 
 /// Monta el `ProfileMenuDrawer` en el slot real `Scaffold.drawer` y lo
 /// abre por código (igual que Home vía `_scaffoldKey`), en vez de

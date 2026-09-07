@@ -24,6 +24,7 @@ import 'package:passenger/features/notifications/data/push_registration_reposito
 import 'package:passenger/features/passenger/data/passenger_profile_repository.dart';
 import 'package:passenger/features/passenger/domain/passenger_profile.dart';
 import 'package:passenger/features/passenger/presentation/edit_profile_screen.dart';
+import 'package:passenger/features/passenger/presentation/passenger_avatar.dart';
 import 'package:passenger/features/places/data/places_repository.dart';
 import 'package:passenger/features/places/domain/place_details.dart';
 import 'package:passenger/features/places/domain/place_prediction.dart';
@@ -1966,6 +1967,92 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Carlos Ruiz'), findsOneWidget);
         expect(find.text('Ana Ruiz'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'PROFILE-PHOTO-2c: _openEditProfile pasa la foto actual y Home adopta '
+      'la foto que devuelve el pop',
+      (tester) async {
+        final repo = _FakePassengerProfileRepository(
+          profileJson: {
+            'firstName': 'Ana',
+            'lastName': 'Ruiz',
+            'photoUrl': 'https://cdn.example/ana-v1.jpg',
+            'ratingAverage': '4.80',
+            'ratingCount': 12,
+          },
+        );
+
+        await _pumpHomeScreen(
+          tester,
+          fareRepository: _FakeFareRepository(estimatedFare: '7.00'),
+          rideRepository: _FakeRideRepository(),
+          passengerProfileRepository: repo,
+        );
+
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+
+        // El avatar del drawer ya muestra la foto actual.
+        expect(
+          tester
+              .widget<PassengerAvatar>(
+                find.descendant(
+                  of: find.byKey(const ValueKey('profile-menu-header')),
+                  matching: find.byType(PassengerAvatar),
+                ),
+              )
+              .photoUrl,
+          'https://cdn.example/ana-v1.jpg',
+        );
+
+        await tester.tap(find.byKey(const ValueKey('profile-menu-header')));
+        await tester.pumpAndSettle();
+
+        // 1) EditProfileScreen recibió la foto actual por constructor.
+        expect(
+          tester
+              .widget<EditProfileScreen>(find.byType(EditProfileScreen))
+              .initialPhotoUrl,
+          'https://cdn.example/ana-v1.jpg',
+        );
+
+        // El backend "resolvió" una foto nueva: un guardado de nombre
+        // trae el perfil actualizado (con esa foto) por el pop.
+        repo.profileJson = {
+          'firstName': 'Ana',
+          'lastName': 'Ruiz',
+          'photoUrl': 'https://cdn.example/ana-v2.jpg',
+          'ratingAverage': '4.80',
+          'ratingCount': 12,
+        };
+
+        await tester.enterText(find.byType(TextFormField).first, 'Carlos');
+        await tester.pump();
+        await tester.tap(
+          find.byKey(const ValueKey('edit-profile-save-button')),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(HomeScreen), findsOneWidget);
+
+        // 2) Home adoptó el perfil del pop: el avatar del drawer muestra
+        // la foto nueva.
+        await tester.tap(find.byTooltip('Abrir menú'));
+        await tester.pumpAndSettle();
+
+        expect(
+          tester
+              .widget<PassengerAvatar>(
+                find.descendant(
+                  of: find.byKey(const ValueKey('profile-menu-header')),
+                  matching: find.byType(PassengerAvatar),
+                ),
+              )
+              .photoUrl,
+          'https://cdn.example/ana-v2.jpg',
+        );
       },
     );
 

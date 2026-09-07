@@ -654,6 +654,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           initialLastName: profile.lastName,
           initialEmail: profile.email,
           initialPhoneE164: profile.phoneE164,
+          initialPhotoUrl: profile.photoUrl,
         ),
       ),
     );

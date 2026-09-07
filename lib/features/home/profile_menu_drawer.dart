@@ -4,6 +4,7 @@ import '../../core/theme/passenger_colors.dart';
 import '../../core/theme/passenger_spacing.dart';
 import '../../core/theme/passenger_typography.dart';
 import '../passenger/domain/passenger_profile.dart';
+import '../passenger/presentation/passenger_avatar.dart';
 
 /// Panel de menú de perfil (PROFILE-MENU-R1), montado en el slot
 /// `Scaffold.drawer` de Home y abierto SOLO por tap del botón de 3
@@ -162,7 +163,7 @@ class _ProfileMenuDrawerState extends State<ProfileMenuDrawer> {
           ),
           child: Row(
             children: [
-              const _Avatar(),
+              PassengerAvatar(photoUrl: profile.photoUrl, diameter: 40),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -203,7 +204,7 @@ class _ProfileMenuDrawerState extends State<ProfileMenuDrawer> {
           children: [
             const Row(
               children: [
-                _Avatar(),
+                PassengerAvatar(photoUrl: null, diameter: 40),
                 SizedBox(width: 14),
                 Expanded(
                   child: Text(
@@ -242,7 +243,7 @@ class _ProfileMenuDrawerState extends State<ProfileMenuDrawer> {
       ),
       child: Row(
         children: [
-          _Avatar(),
+          PassengerAvatar(photoUrl: null, diameter: 40),
           SizedBox(width: 14),
           Expanded(
             child: Text(
@@ -279,31 +280,6 @@ class _ProfileMenuDrawerState extends State<ProfileMenuDrawer> {
     }
 
     return _StarRow(average: profile.ratingAverage);
-  }
-}
-
-/// Ícono de persona genérico en círculo `acento` (blanco sobre verde) —
-/// mismo tratamiento que el punto de "Origen" en
-/// `_buildOriginDestinationCard`. Sin foto real: subir foto de perfil
-/// está fuera de alcance en este checkpoint.
-class _Avatar extends StatelessWidget {
-  const _Avatar();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: const BoxDecoration(
-        color: PassengerColors.acento,
-        shape: BoxShape.circle,
-      ),
-      child: const Icon(
-        Icons.person,
-        color: PassengerColors.blanco,
-        size: 22,
-      ),
-    );
   }
 }
 
