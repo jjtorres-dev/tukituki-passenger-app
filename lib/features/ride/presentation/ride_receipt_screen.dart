@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/theme/passenger_colors.dart';
 import '../data/ride_repository.dart';
 import '../domain/ride_receipt.dart';
 
@@ -24,11 +25,6 @@ class RideReceiptScreen
 
 class _RideReceiptScreenState
     extends ConsumerState<RideReceiptScreen> {
-  static const Color _darkGreen = Color(0xFF123B26);
-  static const Color _green = Color(0xFF1F7A3E);
-  static const Color _cream = Color(0xFFFFF9EC);
-  static const Color _primaryText = Color(0xFF16241C);
-
   final _commentController =
       TextEditingController();
 
@@ -334,12 +330,12 @@ class _RideReceiptScreenState
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(
-        backgroundColor: _cream,
+        backgroundColor: PassengerColors.crema,
         body: SafeArea(
           child: Center(
             child:
                 CircularProgressIndicator(
-              color: _green,
+              color: PassengerColors.acento,
             ),
           ),
         ),
@@ -350,10 +346,10 @@ class _RideReceiptScreenState
 
     if (receipt == null) {
       return Scaffold(
-        backgroundColor: _cream,
+        backgroundColor: PassengerColors.crema,
         appBar: AppBar(
-          backgroundColor: _darkGreen,
-          foregroundColor: Colors.white,
+          backgroundColor: PassengerColors.verdeMarca,
+          foregroundColor: PassengerColors.blanco,
           title: const Text(
             'Recibo',
           ),
@@ -369,7 +365,7 @@ class _RideReceiptScreenState
               textAlign:
                   TextAlign.center,
               style: const TextStyle(
-                color: _primaryText,
+                color: PassengerColors.textoPrimario,
               ),
             ),
           ),
@@ -405,11 +401,11 @@ class _RideReceiptScreenState
         receipt.actualDurationSeconds > 0;
 
     return Scaffold(
-      backgroundColor: _cream,
+      backgroundColor: PassengerColors.crema,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: _darkGreen,
-        foregroundColor: Colors.white,
+        backgroundColor: PassengerColors.verdeMarca,
+        foregroundColor: PassengerColors.blanco,
         title: const Text(
           'Viaje completado',
         ),
@@ -518,9 +514,9 @@ class _RideReceiptScreenState
                   style: OutlinedButton
                       .styleFrom(
                     foregroundColor:
-                        _darkGreen,
+                        PassengerColors.verdeMarca,
                     side: const BorderSide(
-                      color: _darkGreen,
+                      color: PassengerColors.verdeMarca,
                     ),
                   ),
                   onPressed: () {
@@ -558,10 +554,6 @@ class _Header extends StatelessWidget {
   final bool paymentConfirmed;
   final String totalValue;
 
-  static const Color _darkGreen = Color(0xFF123B26);
-  static const Color _green = Color(0xFF1F7A3E);
-  static const Color _secondaryText = Color(0xFF6F7E72);
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -570,12 +562,12 @@ class _Header extends StatelessWidget {
           width: 84,
           height: 84,
           decoration: const BoxDecoration(
-            color: _green,
+            color: PassengerColors.exito,
             shape: BoxShape.circle,
           ),
           child: const Icon(
             Icons.check_rounded,
-            color: Colors.white,
+            color: PassengerColors.blanco,
             size: 46,
           ),
         ),
@@ -588,7 +580,7 @@ class _Header extends StatelessWidget {
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.bold,
-            color: _darkGreen,
+            color: PassengerColors.verdeMarca,
           ),
         ),
 
@@ -599,7 +591,7 @@ class _Header extends StatelessWidget {
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 15,
-            color: _secondaryText,
+            color: PassengerColors.textoSecundario,
           ),
         ),
 
@@ -615,7 +607,7 @@ class _Header extends StatelessWidget {
           style: const TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: _secondaryText,
+            color: PassengerColors.textoSecundario,
           ),
         ),
 
@@ -630,7 +622,7 @@ class _Header extends StatelessWidget {
           style: const TextStyle(
             fontSize: 40,
             fontWeight: FontWeight.bold,
-            color: _darkGreen,
+            color: PassengerColors.verdeMarca,
           ),
         ),
       ],
@@ -651,12 +643,6 @@ class _RouteCard extends StatelessWidget {
   final String? distanceText;
   final String? durationText;
 
-  static const Color _green = Color(0xFF1F7A3E);
-  static const Color _destinationColor = Color(0xFFD8542C);
-  static const Color _secondaryCream = Color(0xFFFBF7EA);
-  static const Color _border = Color(0xFFE7E0CB);
-  static const Color _softBorder = Color(0xFFEFE8D4);
-
   @override
   Widget build(BuildContext context) {
     final hasMetrics =
@@ -665,10 +651,10 @@ class _RouteCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: _secondaryCream,
+        color: PassengerColors.crema,
         borderRadius:
             BorderRadius.circular(16),
-        border: Border.all(color: _border),
+        border: Border.all(color: PassengerColors.bordeSuave),
       ),
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -678,7 +664,7 @@ class _RouteCard extends StatelessWidget {
               'trip-origin',
             ),
             icon: Icons.my_location,
-            iconColor: _green,
+            iconColor: PassengerColors.acento,
             label: 'Origen',
             address: originAddress,
           ),
@@ -690,7 +676,7 @@ class _RouteCard extends StatelessWidget {
             ),
             child: Divider(
               height: 1,
-              color: _softBorder,
+              color: PassengerColors.bordeSuave,
             ),
           ),
 
@@ -699,7 +685,7 @@ class _RouteCard extends StatelessWidget {
               'trip-destination',
             ),
             icon: Icons.location_on,
-            iconColor: _destinationColor,
+            iconColor: PassengerColors.destino,
             label: 'Destino',
             address: destinationAddress,
           ),
@@ -712,7 +698,7 @@ class _RouteCard extends StatelessWidget {
               ),
               child: Divider(
                 height: 1,
-                color: _softBorder,
+                color: PassengerColors.bordeSuave,
               ),
             ),
 
@@ -753,9 +739,6 @@ class _AddressRow extends StatelessWidget {
   final String label;
   final String address;
 
-  static const Color _primaryText = Color(0xFF16241C);
-  static const Color _secondaryText = Color(0xFF6F7E72);
-
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -780,7 +763,7 @@ class _AddressRow extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: _secondaryText,
+                  color: PassengerColors.textoSecundario,
                 ),
               ),
 
@@ -791,7 +774,7 @@ class _AddressRow extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
-                  color: _primaryText,
+                  color: PassengerColors.textoPrimario,
                 ),
               ),
             ],
@@ -825,23 +808,14 @@ class _PaymentCard extends StatelessWidget {
   final bool isPendingFlow;
   final String? status;
 
-  static const Color _darkGreen = Color(0xFF123B26);
-  static const Color _secondaryCream = Color(0xFFFBF7EA);
-  static const Color _border = Color(0xFFE7E0CB);
-  static const Color _softBorder = Color(0xFFEFE8D4);
-  static const Color _pendingColor = Color(0xFFB8790C);
-  static const Color _pendingBackground = Color(0xFFFFF3D9);
-  static const Color _destinationColor = Color(0xFFD8542C);
-  static const Color _terminalBackground = Color(0xFFFBE7DE);
-
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: _secondaryCream,
+        color: PassengerColors.crema,
         borderRadius:
             BorderRadius.circular(16),
-        border: Border.all(color: _border),
+        border: Border.all(color: PassengerColors.bordeSuave),
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -850,7 +824,7 @@ class _PaymentCard extends StatelessWidget {
             children: [
               const Icon(
                 Icons.payments_outlined,
-                color: _darkGreen,
+                color: PassengerColors.verdeMarca,
               ),
 
               const SizedBox(width: 8),
@@ -860,7 +834,7 @@ class _PaymentCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: _darkGreen,
+                  color: PassengerColors.verdeMarca,
                 ),
               ),
 
@@ -915,15 +889,15 @@ class _PaymentCard extends StatelessWidget {
 
             const Divider(
               height: 1,
-              color: _softBorder,
+              color: PassengerColors.bordeSuave,
             ),
 
             const SizedBox(height: 14),
 
             const LinearProgressIndicator(
-              color: _pendingColor,
+              color: PassengerColors.pildoraTextoPendiente,
               backgroundColor:
-                  _pendingBackground,
+                  PassengerColors.pildoraFondoPendiente,
             ),
 
             const SizedBox(height: 14),
@@ -938,7 +912,7 @@ class _PaymentCard extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: _pendingColor,
+                color: PassengerColors.pildoraTextoPendiente,
               ),
             ),
 
@@ -950,7 +924,7 @@ class _PaymentCard extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
-                color: Color(0xFF6F7E72),
+                color: PassengerColors.textoSecundario,
               ),
             ),
           ],
@@ -960,7 +934,7 @@ class _PaymentCard extends StatelessWidget {
 
             const Divider(
               height: 1,
-              color: _softBorder,
+              color: PassengerColors.bordeSuave,
             ),
 
             const SizedBox(height: 14),
@@ -973,7 +947,7 @@ class _PaymentCard extends StatelessWidget {
               padding:
                   const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: _terminalBackground,
+                color: PassengerColors.pildoraFondoTerminal,
                 borderRadius:
                     BorderRadius.circular(12),
               ),
@@ -981,7 +955,7 @@ class _PaymentCard extends StatelessWidget {
                 children: [
                   const Icon(
                     Icons.warning_amber,
-                    color: _destinationColor,
+                    color: PassengerColors.destino,
                   ),
 
                   const SizedBox(width: 10),
@@ -991,7 +965,7 @@ class _PaymentCard extends StatelessWidget {
                       'El pago está en estado '
                       '$status.',
                       style: const TextStyle(
-                        color: _destinationColor,
+                        color: PassengerColors.destino,
                         fontWeight:
                             FontWeight.w600,
                       ),
@@ -1018,13 +992,6 @@ class _StatusPill extends StatelessWidget {
   final bool isTerminal;
   final String? status;
 
-  static const Color _green = Color(0xFF1F7A3E);
-  static const Color _paidBackground = Color(0xFFE3F1E7);
-  static const Color _pendingColor = Color(0xFFB8790C);
-  static const Color _pendingBackground = Color(0xFFFFF3D9);
-  static const Color _destinationColor = Color(0xFFD8542C);
-  static const Color _terminalBackground = Color(0xFFFBE7DE);
-
   @override
   Widget build(BuildContext context) {
     late final String label;
@@ -1034,22 +1001,22 @@ class _StatusPill extends StatelessWidget {
 
     if (paymentConfirmed) {
       label = 'Pagado';
-      foreground = _green;
-      background = _paidBackground;
+      foreground = PassengerColors.exito;
+      background = PassengerColors.pildoraFondoPagado;
       key = const ValueKey(
         'payment-status-paid',
       );
     } else if (isTerminal) {
       label = status ?? '-';
-      foreground = _destinationColor;
-      background = _terminalBackground;
+      foreground = PassengerColors.destino;
+      background = PassengerColors.pildoraFondoTerminal;
       key = const ValueKey(
         'payment-status-terminal',
       );
     } else {
       label = 'Pendiente';
-      foreground = _pendingColor;
-      background = _pendingBackground;
+      foreground = PassengerColors.pildoraTextoPendiente;
+      background = PassengerColors.pildoraFondoPendiente;
       key = const ValueKey(
         'payment-status-pending',
       );
@@ -1103,20 +1070,14 @@ class _RatingSection extends StatelessWidget {
       onTagToggled;
   final VoidCallback onSubmit;
 
-  static const Color _darkGreen = Color(0xFF123B26);
-  static const Color _green = Color(0xFF1F7A3E);
-  static const Color _ctaYellow = Color(0xFFFFC72C);
-  static const Color _secondaryCream = Color(0xFFFBF7EA);
-  static const Color _border = Color(0xFFE7E0CB);
-
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: _secondaryCream,
+        color: PassengerColors.crema,
         borderRadius:
             BorderRadius.circular(16),
-        border: Border.all(color: _border),
+        border: Border.all(color: PassengerColors.bordeSuave),
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -1127,7 +1088,7 @@ class _RatingSection extends StatelessWidget {
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: _darkGreen,
+              color: PassengerColors.verdeMarca,
             ),
           ),
 
@@ -1152,11 +1113,11 @@ class _RatingSection extends StatelessWidget {
                     iconSize: 40,
                     disabledColor:
                         value <= score
-                            ? _ctaYellow
-                            : _border,
+                            ? PassengerColors.amarilloCTA
+                            : PassengerColors.bordeSuave,
                     color: value <= score
-                        ? _ctaYellow
-                        : _border,
+                        ? PassengerColors.amarilloCTA
+                        : PassengerColors.bordeSuave,
                     icon: Icon(
                       value <= score
                           ? Icons.star
@@ -1189,7 +1150,7 @@ class _RatingSection extends StatelessWidget {
                     ),
                     selected: selected,
                     selectedColor:
-                        _ctaYellow
+                        PassengerColors.amarilloCTA
                             .withValues(
                       alpha: 0.35,
                     ),
@@ -1223,7 +1184,7 @@ class _RatingSection extends StatelessWidget {
 
             FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: _green,
+                backgroundColor: PassengerColors.acento,
               ),
               onPressed:
                   sending ? null : onSubmit,
@@ -1234,7 +1195,7 @@ class _RatingSection extends StatelessWidget {
                       child:
                           CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: PassengerColors.blanco,
                       ),
                     )
                   : const Icon(
@@ -1261,7 +1222,7 @@ class _RatingSection extends StatelessWidget {
             const Icon(
               Icons.favorite,
               size: 44,
-              color: _green,
+              color: PassengerColors.exito,
             ),
 
             const SizedBox(height: 8),
@@ -1272,7 +1233,7 @@ class _RatingSection extends StatelessWidget {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: _darkGreen,
+                color: PassengerColors.verdeMarca,
               ),
             ),
           ],
@@ -1292,9 +1253,6 @@ class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
 
-  static const Color _primaryText = Color(0xFF16241C);
-  static const Color _secondaryText = Color(0xFF6F7E72);
-
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1310,7 +1268,7 @@ class _InfoRow extends StatelessWidget {
             child: Text(
               label,
               style: const TextStyle(
-                color: _secondaryText,
+                color: PassengerColors.textoSecundario,
               ),
             ),
           ),
@@ -1322,7 +1280,7 @@ class _InfoRow extends StatelessWidget {
             textAlign: TextAlign.end,
             style: const TextStyle(
               fontWeight: FontWeight.bold,
-              color: _primaryText,
+              color: PassengerColors.textoPrimario,
             ),
           ),
         ],

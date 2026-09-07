@@ -101,6 +101,18 @@ class PassengerColors {
   static const Color aviso = Color(0xFFB8641E);
   static const Color fondoAviso = Color(0xFFFFF0E8);
 
+  // Píldora de estado de pago — texto y fondos de la píldora/indicador
+  // que muestra el estado del cobro en el recibo. Formalizan valores que
+  // `ride_receipt_screen.dart` ya usaba como literales privados
+  // (rama `test/receipt-design-colors`, 2026-09-06) — sin cambio visual.
+  // Todavía no están en `sistema-de-diseno.md` sección 2: queda pendiente
+  // decidir si el sistema adopta una familia de píldora de estado o si el
+  // recibo se reduce a `exito`/`alerta`/`fondoAviso`.
+  static const Color pildoraTextoPendiente = Color(0xFFB8790C);
+  static const Color pildoraFondoPendiente = Color(0xFFFFF3D9);
+  static const Color pildoraFondoPagado = Color(0xFFE3F1E7);
+  static const Color pildoraFondoTerminal = Color(0xFFFBE7DE);
+
   // Texto sobre fondo oscuro — ver nota de clase.
   static const Color textoTenueSobreOscuro = Color(0xFF8FA891);
   static const Color textoSecundarioSobreOscuro = Color(0xFFB9C8BC);
